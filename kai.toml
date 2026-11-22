@@ -3,3 +3,16 @@ version = "0.1.0"
 entry = "src/main.kai"
 
 [dependencies]
+ahu = { source = "github.com/kaikailang-org/ahu", ref = "v0.3.0" }
+
+[native]
+sources = [
+  "c/kts.c",
+  "c/kts_query.c",
+  "vendor/tree-sitter/lib/src/lib.c",
+  "vendor/grammars/rust/src/parser.c",
+  "vendor/grammars/rust/src/scanner.c",
+  "vendor/grammars/kaikai/src/parser.c",
+  "vendor/grammars/kaikai/src/scanner.c",
+]
+include = ["c", "vendor/tree-sitter/lib/include", "vendor/tree-sitter/lib/src"]

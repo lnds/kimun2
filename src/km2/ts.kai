@@ -1,0 +1,67 @@
+# Bindings to the C shim (`c/kts.c`): the only module that crosses the FFI.
+
+#[doc("A parsed file, flattened by the shim; freed with `free`.")]
+extern "C" pub opaque Doc
+
+#[doc("Parses `src` with the grammar named `lang`.")]
+extern "C"("kts_parse") pub fn parse(lang: String, src: String) : Doc / Ffi
+
+#[doc("Whether the grammar existed and the parse produced a tree.")]
+extern "C"("kts_ok") pub fn parsed(d: Doc) : Bool / Ffi
+
+#[doc("Releases the document and everything the shim holds for it.")]
+extern "C"("kts_free") pub fn free(d: Doc) : Unit / Ffi
+
+#[doc("Number of nodes, in preorder.")]
+extern "C"("kts_count") pub fn count(d: Doc) : Int / Ffi
+
+#[doc("Grammar symbol of node `i`.")]
+extern "C"("kts_symbol") pub fn symbol(d: Doc, i: Int) : Int / Ffi
+
+#[doc("Whether node `i` has no children.")]
+extern "C"("kts_leaf") pub fn leaf(d: Doc, i: Int) : Bool / Ffi
+
+#[doc("Number of nodes in the subtree of `i`, itself included.")]
+extern "C"("kts_descendants") pub fn descendants(d: Doc, i: Int) : Int / Ffi
+
+#[doc("Row where node `i` starts.")]
+extern "C"("kts_start_row") pub fn start_row(d: Doc, i: Int) : Int / Ffi
+
+#[doc("Row where node `i` ends.")]
+extern "C"("kts_end_row") pub fn end_row(d: Doc, i: Int) : Int / Ffi
+
+#[doc("Column where node `i` ends.")]
+extern "C"("kts_end_col") pub fn end_col(d: Doc, i: Int) : Int / Ffi
+
+#[doc("Number of symbols of the grammar named `lang`.")]
+extern "C"("kts_symbol_count") pub fn symbol_count(lang: String) : Int / Ffi
+
+#[doc("Name of a symbol of the grammar named `lang`.")]
+extern "C"("kts_symbol_name") pub fn symbol_name(lang: String, symbol: Int) : String / Ffi
+
+#[doc("A compiled tree-sitter query; freed with `query_free`.")]
+extern "C" pub opaque Query
+
+#[doc("Compiles the query `src` for the grammar named `lang`.")]
+extern "C"("kts_query_new") pub fn query(lang: String, src: String) : Query / Ffi
+
+#[doc("Byte offset of the first error in the query source, or -1 when it compiled.")]
+extern "C"("kts_query_error") pub fn query_error(q: Query) : Int / Ffi
+
+#[doc("Releases a compiled query.")]
+extern "C"("kts_query_free") pub fn query_free(q: Query) : Unit / Ffi
+
+#[doc("Number of capture names of a query.")]
+extern "C"("kts_capture_count") pub fn capture_count(q: Query) : Int / Ffi
+
+#[doc("Name of capture `id` of a query.")]
+extern "C"("kts_capture_name") pub fn capture_name(q: Query, id: Int) : String / Ffi
+
+#[doc("Runs the query over the document and returns how many captures it made.")]
+extern "C"("kts_run") pub fn run(d: Doc, q: Query) : Int / Ffi
+
+#[doc("Capture id of capture `k` of the last run.")]
+extern "C"("kts_capture_id") pub fn capture_id(d: Doc, k: Int) : Int / Ffi
+
+#[doc("Preorder index of the node of capture `k` of the last run.")]
+extern "C"("kts_capture_node") pub fn capture_node(d: Doc, k: Int) : Int / Ffi
