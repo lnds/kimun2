@@ -1,0 +1,111 @@
+# Line classification: blank, comment or code, read byte by byte along
+# each line with the state a line hands to the next, as km reads it.
+
+import km2.languages.{Spec}
+import km2.lexical.bytes.{byte, one_of}
+import km2.lexical.heredoc
+import km2.lexical.normal
+import km2.lexical.scan
+import km2.lexical.scan.{Lexer, Seen}
+import km2.lexical.state.{State, StNormal, StString, StBlock, StDoc, StDocString, StHeredoc}
+
+#[doc("What a line is.")]
+pub type LineKind = Blank | Comment | Code
+
+fn in_comment(state: State) : Bool = match state {
+  StBlock(_, _, _) -> true
+  StDoc(_, _) -> true
+  _ -> false
+}
+
+fn starts_in_comment(state: State) : Bool = match state {
+  StDocString(_) -> true
+  _ -> in_comment(state)
+}
+
+fn starts_in_string(state: State) : Bool = match state {
+  StString(_) -> true
+  _ -> false
+}
+
+fn kind_of(seen: Seen) : LineKind =
+  if seen.code { Code } else if seen.comment { Comment } else { Blank }
+
+fn read_from(lx: Lexer, line: String, start: Int, state: State) : (LineKind, State) {
+  let code = start > 0 or starts_in_string(state)
+  let n = string.byte_length(line)
+  let (after, held) = scan.scan(lx, line, start, n, state, code, starts_in_comment(state), None)
+  (kind_of(held), scan.end_line(after, byte(line, n - 1) == 92, held.heredoc))
+}
+
+fn read_line(lx: Lexer, line: String, state: State) : (LineKind, State) = match state {
+  StHeredoc(h) -> match heredoc.terminator_end(line, h) {
+    None -> (Code, state)
+    Some(end) -> read_from(lx, line, end, StNormal)
+  }
+  _ -> read_from(lx, line, 0, state)
+}
+
+fn is_column_one_comment(spec: Spec, line: String) : Bool =
+  one_of(spec.column_one, byte(line, 0)) and (not normal.is_directive(spec, line, 1))
+
+fn is_normal(state: State) : Bool = match state {
+  StNormal -> true
+  _ -> false
+}
+
+fn classify(lx: Lexer, number: Int, line: String, state: State) : (LineKind, State) =
+  if number == 0 and string.starts_with(line, "#!") {
+    (Code, state)
+  } else if string.is_blank(line) and (not in_comment(state)) {
+    (Blank, state)
+  } else if is_normal(state) and is_column_one_comment(lx.spec, line) {
+    (Comment, state)
+  } else {
+    read_line(lx, line, state)
+  }
+
+#[doc("Blank, comment and code line counts.")]
+pub type Tally = { blank: Int, comment: Int, code: Int }
+
+fn count(t: Tally, kind: LineKind) : Tally = match kind {
+  Blank -> Tally { ...t, blank: t.blank + 1 }
+  Comment -> Tally { ...t, comment: t.comment + 1 }
+  Code -> Tally { ...t, code: t.code + 1 }
+}
+
+# A line without the carriage return of a CRLF ending.
+fn without_cr(line: String) : String {
+  let n = string.byte_length(line)
+  if byte(line, n - 1) == 13 { string.slice(line, 0, n - 1) } else { line }
+}
+
+fn fold_lines(
+  lx: Lexer,
+  lines: [String],
+  number: Int,
+  state: State,
+  acc: a,
+  f: (a, LineKind) -> a
+) : a = match lines {
+  [] -> acc
+  [line, ...rest] -> {
+    let (kind, next) = classify(lx, number, without_cr(line), state)
+    fold_lines(lx, rest, number + 1, next, f(acc, kind), f)
+  }
+}
+
+# Folds `f` over the kind of every line of a source, byte order mark aside.
+fn fold_kinds(spec: Spec, src: String, acc: a, f: (a, LineKind) -> a) : a {
+  let lx = scan.lexer(spec)
+  let lines = string.lines(string.drop_prefix(src, "\u{FEFF}") ?? src)
+  fold_lines(lx, lines, 0, StNormal, acc, f)
+}
+
+#[doc("Counts the blank, comment and code lines of a source, byte order mark aside.")]
+pub fn tally(spec: Spec, src: String) : Tally =
+  fold_kinds(spec, src, Tally { blank: 0, comment: 0, code: 0 }, count)
+
+#[doc("The kind of every line of a source, in order, byte order mark aside.")]
+pub fn kinds(spec: Spec, src: String) : [LineKind] =
+  fold_kinds(spec, src, [], (acc, k) => [k, ...acc]) |> list.reverse

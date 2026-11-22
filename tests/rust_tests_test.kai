@@ -1,0 +1,39 @@
+import km2.rust_tests
+import km2.rust_literals
+
+test "a cfg(test) path module names its file beside the declaring one" {
+  let src = "pub fn f() {}\n\n#[cfg(test)]\n#[path = \"walk_test.rs\"]\nmod tests;\n"
+  assert rust_tests.test_modules("src/walk.rs", src, ["src/walk.rs", "src/walk_test.rs"])
+    == ["src/walk_test.rs"]
+}
+
+test "a module of lib.rs lives beside it; one of foo.rs under foo/" {
+  let src = "#[cfg(test)]\nmod testutil;\n"
+  assert rust_tests.test_modules("src/lib.rs", src, ["src/testutil.rs"]) == ["src/testutil.rs"]
+  assert rust_tests.test_modules("src/foo.rs", src, ["src/foo/testutil/mod.rs"])
+    == ["src/foo/testutil/mod.rs"]
+}
+
+test "a module with a body declares no file, and comments or strings hold none" {
+  assert rust_tests.test_modules("src/a.rs", "#[cfg(test)]\nmod tests {\n  use super::*;\n}\n", [
+    "src/a/tests.rs"
+  ])
+    == []
+  assert rust_tests.test_modules(
+    "src/a.rs",
+    "// #[cfg(test)]\n// mod t;\nconst S: &str = \"#[cfg(test)] mod u;\";\n",
+    ["src/a/t.rs", "src/a/u.rs"]
+  )
+    == []
+}
+
+test "files under a test module's directory are in it" {
+  assert rust_tests.in_test_module("src/testutil/x.rs", ["src/testutil.rs"])
+  assert rust_tests.in_test_module("src/t/y.rs", ["src/t/mod.rs"])
+  assert not rust_tests.in_test_module("src/testutils.rs", ["src/testutil.rs"])
+}
+
+test "blanking keeps lines and blanks literals" {
+  assert rust_literals.code_lines("let a = \"x\"; // c\nlet r = r#\"q\"#;\n")
+    == ["let a = \" \";     ", "let r =   \" \" ;"]
+}

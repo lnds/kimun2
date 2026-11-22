@@ -1,0 +1,90 @@
+# Heredocs: a marker on a line, the text on the lines after it, up to a
+# line that holds the terminator.
+
+import km2.languages.spec.{Heredocs, HerePhp, HereRuby}
+import km2.lexical.bytes.{byte, at, is_alpha, is_word, word_len}
+
+#[doc("A heredoc whose text starts on the next line: its terminator and whether it may be indented.")]
+pub type Heredoc = { terminator: String, indented: Bool }
+
+fn is_php(flavor: Heredocs) : Bool = match flavor {
+  HerePhp -> true
+  _ -> false
+}
+
+fn is_ruby(flavor: Heredocs) : Bool = match flavor {
+  HereRuby -> true
+  _ -> false
+}
+
+fn arrows(flavor: Heredocs) : Int = if is_php(flavor) { 3 } else { 2 }
+
+fn arrows_at(line: String, i: Int, k: Int) : Bool =
+  k == 0 or (byte(line, i) == 60 and arrows_at(line, i + 1, k - 1))
+
+fn spaces(line: String, i: Int) : Int = if byte(line, i) == 32 { spaces(line, i + 1) } else { i }
+
+fn name_len(line: String, i: Int) : Int {
+  let b = byte(line, i)
+  if is_alpha(b) or b == 95 { word_len(line, i, 0) } else { 0 }
+}
+
+fn is_dash(flavor: Heredocs, b: Int) : Bool = (b == 45 or b == 126) and (not is_php(flavor))
+
+fn quote_at(line: String, j: Int) : Int {
+  let q = byte(line, j)
+  if q == 39 or q == 34 { q } else { -1 }
+}
+
+fn is_upper(b: Int) : Bool = b >= 65 and b <= 90
+
+# The word of a marker at `w`, its quote and dash read: none when Ruby's
+# bare word does not start upper case, or a quote does not close.
+fn word_of(flavor: Heredocs, line: String, w: Int, quote: Int, dash: Bool) : Option[(String, Int)] {
+  let word = name_len(line, w)
+  let bare = (not dash) and quote < 0
+  let end = w + word
+  let closed = quote < 0 or byte(line, end) == quote
+  let shouted = (not bare) or (not is_ruby(flavor)) or is_upper(byte(line, w))
+  if word > 0 and shouted and closed {
+    Some((string.slice(line, w, word), if quote >= 0 { end + 1 } else { end }))
+  } else {
+    None
+  }
+}
+
+# The heredoc of a marker from `i`, the arrows read: a dash or spaces, a
+# quote, the word, the closing quote.
+fn marker(flavor: Heredocs, line: String, from: Int, i: Int) : Option[(Heredoc, Int)] {
+  let php = is_php(flavor)
+  let dash = is_dash(flavor, byte(line, i))
+  let j = if php { spaces(line, i) } else if dash { i + 1 } else { i }
+  let quote = quote_at(line, j)
+  let w = if quote >= 0 { j + 1 } else { j }
+  word_of(flavor, line, w, quote, dash)
+    |> option.map(found => {
+      let (terminator, end) = found
+      (Heredoc { terminator: terminator, indented: dash or php }, end - from)
+    })
+}
+
+#[doc("The heredoc whose marker starts at `i`, with the width of the marker.")]
+pub fn open(flavor: Heredocs, line: String, i: Int) : Option[(Heredoc, Int)] {
+  let k = arrows(flavor)
+  if string.byte_length(line) - i > k and arrows_at(line, i, k) {
+    marker(flavor, line, i, i + k)
+  } else {
+    None
+  }
+}
+
+#[doc("Where the terminator of `h` ends on `line`, when the line holds it.")]
+pub fn terminator_end(line: String, h: Heredoc) : Option[Int] {
+  let start = if h.indented {
+    string.byte_length(line) - string.byte_length(string.trim_left(line))
+  } else {
+    0
+  }
+  let end = start + string.byte_length(h.terminator)
+  if at(line, start, h.terminator) and (not is_word(byte(line, end))) { Some(end) } else { None }
+}

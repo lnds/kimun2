@@ -1,0 +1,2 @@
+// comment
+plugins { id 'java' } /* c */

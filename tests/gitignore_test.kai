@@ -1,0 +1,37 @@
+import km2.gitignore
+import km2.gitignore.{Ignored, Whitelisted, Unmatched}
+
+fn v(text: String, path: String, is_dir: Bool) : gitignore.Verdict =
+  gitignore.matched(gitignore.parse("./repo", text), path, is_dir)
+
+test "a pattern without a slash matches at any depth" {
+  assert v("*.log\n", "./repo/a/b/x.log", false) == Ignored
+  assert v("target\n", "./repo/sub/target", true) == Ignored
+}
+
+test "a pattern with a slash is anchored to its file's directory" {
+  assert v("/build\n", "./repo/build", true) == Ignored
+  assert v("/build\n", "./repo/a/build", true) == Unmatched
+  assert v("docs/*.md\n", "./repo/docs/a.md", false) == Ignored
+  assert v("docs/*.md\n", "./repo/docs/x/a.md", false) == Unmatched
+}
+
+test "a trailing slash matches directories only" {
+  assert v("out/\n", "./repo/out", true) == Ignored
+  assert v("out/\n", "./repo/out", false) == Unmatched
+}
+
+test "the last matching line decides, and a bang re-includes" {
+  assert v("*.log\n!keep.log\n", "./repo/keep.log", false) == Whitelisted
+  assert v("!keep.log\n*.log\n", "./repo/keep.log", false) == Ignored
+}
+
+test "comments, blanks and escapes" {
+  assert v("# note\n\n\\#hash\n", "./repo/#hash", false) == Ignored
+  assert v("# note\n", "./repo/# note", false) == Unmatched
+}
+
+test "a trailing double star matches inside a directory, not the directory" {
+  assert v("gen/**\n", "./repo/gen/a.rs", false) == Ignored
+  assert v("gen/**\n", "./repo/gen", true) == Unmatched
+}

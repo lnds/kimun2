@@ -7,7 +7,7 @@ KM2 := ./km2
 
 KAI_VERSION := $(shell cat .kaikai-version)
 
-.PHONY: build test fmt fmt-check lint toolchain gate-km gate-km2 gate ci
+.PHONY: build test fmt fmt-check lint toolchain gate-km gate-km2 gate diff-km ci
 
 toolchain:
 	@$(KAI) --version | grep -q " $(KAI_VERSION) " || \
@@ -38,4 +38,9 @@ gate-km2: build
 
 gate: gate-km gate-km2
 
-ci: fmt-check lint build test gate
+# Differential tests: km and km2 on the same arguments, output compared
+# byte for byte (tests/diff/*.args, one argument set per line).
+diff-km: build
+	@cat tests/diff/*.args | bash tools/diff-matrix.sh $(KM2)
+
+ci: fmt-check lint build test gate diff-km

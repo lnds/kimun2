@@ -1,0 +1,50 @@
+import km2.glob
+
+fn m(pattern: String, path: String) : Bool = match glob.compile(pattern, false) {
+  Ok(g) -> glob.matches(g, path)
+  Err(_) -> false
+}
+
+fn ms(pattern: String, path: String) : Bool = match glob.compile(pattern, true) {
+  Ok(g) -> glob.matches(g, path)
+  Err(_) -> false
+}
+
+fn err(pattern: String) : String = match glob.compile(pattern, false) {
+  Ok(_) -> ""
+  Err(e) -> e
+}
+
+test "a star crosses separators unless they are literal" {
+  assert m("*.min.js", "a/b/c.min.js")
+  assert not ms("*.min.js", "a/b/c.min.js")
+  assert ms("*.js", "c.js")
+}
+
+test "a double star spans directories" {
+  assert m("vendor/**", "vendor/a/b.rs")
+  assert not m("vendor/**", "vendor")
+  assert m("**/x.rs", "x.rs")
+  assert m("**/x.rs", "a/b/x.rs")
+  assert ms("a/**/b", "a/b")
+  assert ms("a/**/b", "a/x/y/b")
+  assert not ms("a/**/b", "a/xb")
+}
+
+test "classes, alternatives and escapes" {
+  assert m("[a-c].rs", "b.rs")
+  assert not m("[!a-c].rs", "b.rs")
+  assert m("*.{js,ts}", "x.ts")
+  assert m("*.{js,{t,r}s}", "x.rs")
+  assert not m("*.{js,ts}", "x.rs")
+  assert m("\\*.rs", "*.rs")
+  assert not m("\\*.rs", "a.rs")
+}
+
+test "invalid globs carry km's messages" {
+  assert err("[") == "error parsing glob '[': unclosed character class; missing ']'"
+  assert err("{a,b")
+    == "error parsing glob '{a,b': unclosed alternate group; missing '}' (maybe escape '{' with '[{]'?)"
+  assert err("a\\") == "error parsing glob 'a\\': dangling '\\'"
+  assert err("[z-a]") == "error parsing glob '[z-a]': invalid range; 'z' > 'a'"
+}

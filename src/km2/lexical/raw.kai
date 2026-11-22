@@ -1,0 +1,79 @@
+# Literals a prefix opens: Rust's raw strings, C++'s raw strings and C#'s
+# verbatim strings.
+
+import km2.languages.spec.{Spec}
+import km2.lexical.bytes.{byte, at, is_word, one_of, count_run, skip_until}
+import km2.lexical.delim.{Delim, delimited}
+
+type Opened = Option[(Int, Delim)]
+
+fn first_prefix(line: String, i: Int, prefixes: [String]) : Int = match prefixes {
+  [] -> 0
+  [p, ...rest] -> if at(line, i, p) { string.byte_length(p) } else { first_prefix(line, i, rest) }
+}
+
+# `r"…"`, `r#"…"#`, with a `b` or `c` prefix.
+fn rust_raw(line: String, i: Int) : Opened {
+  let prefix = first_prefix(line, i, ["r", "br", "cr"])
+  let hashes = count_run(line, i + prefix, 35, 0)
+  if prefix > 0 and byte(line, i + prefix + hashes) == 34 {
+    Some((prefix + hashes + 1, delimited("\"" ++ string.repeat("#", hashes), false, true)))
+  } else {
+    None
+  }
+}
+
+fn tag_ok(line: String, from: Int, to: Int) : Bool =
+  from >= to
+    or ((not one_of(" )\\\t\"", byte(line, from)))
+      and tag_ok(
+        line,
+        from + 1,
+        to
+      ))
+
+# `R"tag(…)tag"`, with an encoding prefix too; a tag holds up to 16 bytes.
+fn cpp_raw(line: String, i: Int) : Opened {
+  let prefix = first_prefix(line, i, ["R\"", "u8R\"", "uR\"", "UR\"", "LR\""])
+  let from = i + prefix
+  let paren = skip_until(line, from, from + 17, 40, -1, -1)
+  if prefix > 0 and byte(line, paren) == 40 and paren < from + 17 and tag_ok(line, from, paren) {
+    let close = ")" ++ string.slice(line, from, paren - from) ++ "\""
+    Some((paren + 1 - i, delimited(close, false, true)))
+  } else {
+    None
+  }
+}
+
+# `@"…"`, `$@"…"`, `@$"…"`: no escapes, a doubled quote stands for one.
+fn verbatim(line: String, i: Int) : Opened {
+  let prefix = first_prefix(line, i, ["@\"", "$@\"", "@$\""])
+  if prefix > 0 {
+    Some((prefix, Delim { ...delimited("\"", false, true), doubled: true }))
+  } else {
+    None
+  }
+}
+
+fn starts_word(line: String, start: Int, i: Int) : Bool {
+  let b = byte(line, i - 1)
+  i == start or (b < 128 and (not is_word(b)))
+}
+
+fn may_open_rust_raw(b: Int) : Bool = b == 114 or b == 98 or b == 99
+
+fn may_open_cpp_raw(b: Int) : Bool = b == 82 or b == 117 or b == 85 or b == 76
+
+#[doc("The literal a prefix opens at `i`: a raw string where a word starts, or a verbatim string.")]
+pub fn open(spec: Spec, line: String, start: Int, i: Int) : Option[(Int, Delim)] {
+  let b = byte(line, i)
+  if spec.raw_strings and may_open_rust_raw(b) and starts_word(line, start, i) {
+    rust_raw(line, i)
+  } else if spec.cpp_raw and may_open_cpp_raw(b) and starts_word(line, start, i) {
+    cpp_raw(line, i)
+  } else if spec.verbatim and (b == 64 or b == 36) {
+    verbatim(line, i)
+  } else {
+    None
+  }
+}

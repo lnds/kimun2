@@ -1,0 +1,98 @@
+# Literals a mark opens with a delimiter the code picks: Elixir's sigils
+# (`~r/…/`) and Ruby's percent literals (`%w[…]`), in which brackets nest;
+# and the quotes that open none (`$'`, a shell's `\'`).
+
+import km2.languages.spec.{Spec, ValueStart}
+import km2.lexical.bytes.{byte, one_of, alpha_len, holds_interpolation, skip_until}
+import km2.lexical.delim.{Delim}
+import km2.lexical.regex
+
+fn closer(open: Int, same: String) : Int = match open {
+  40 -> 41
+  91 -> 93
+  123 -> 125
+  60 -> 62
+  _ -> if one_of(same, open) { open } else { -1 }
+}
+
+# Whether the line from `from` holds a `#{` before the next `close`.
+fn interpolates(line: String, from: Int, close: Int) : Bool =
+  holds_interpolation(line, from, skip_until(line, from, string.byte_length(line), close, -1, -1))
+
+fn marked(close: Int, nests: Option[(Int, Int)]) : Delim =
+  Delim {
+    close: string.int_to_byte_string(close),
+    escapes: true,
+    doubled: false,
+    spans: true,
+    nests: nests
+  }
+
+# A sigil whose delimiter is no quote; one that interpolates before its
+# close on the line is read as code.
+fn sigil(line: String, i: Int) : Option[(Int, Delim)] {
+  let letters = alpha_len(line, i + 1, 0)
+  let close = closer(byte(line, i + 1 + letters), "/|")
+  let first = byte(line, i + 1)
+  let interpolated = first >= 97 and first <= 122 and interpolates(line, i + 2 + letters, close)
+  if byte(line, i) == 126 and letters > 0 and close >= 0 and (not interpolated) {
+    Some((letters + 2, marked(close, None)))
+  } else {
+    None
+  }
+}
+
+fn percent(line: String, i: Int, same: String) : Option[(Int, Delim)] {
+  let typed = if one_of("qQwWiIrsx", byte(line, i + 1)) { 1 } else { 0 }
+  let open = byte(line, i + 1 + typed)
+  let close = closer(open, same)
+  let nests = if close != open { Some((open, 0)) } else { None }
+  let plain = one_of("qwis", byte(line, i + 1))
+  if close < 0
+    or ((not plain) and option.is_none(nests) and interpolates(line, i + 2 + typed, close)) {
+    None
+  } else {
+    Some((typed + 2, marked(close, nests)))
+  }
+}
+
+# A percent literal where a value may start: after an operator with any
+# usual delimiter, as an argument only with a bracket or `!|/^`.
+fn percent_at(rule: ValueStart, line: String, start: Int, i: Int) : Option[(Int, Delim)] =
+  if regex.after_operator(rule, line, start, i) {
+    percent(line, i, "!|/^~-:;,.@#$&*+?")
+  } else if regex.as_argument(rule, line, start, i) {
+    percent(line, i, "!|/^")
+  } else {
+    None
+  }
+
+#[doc("The literal a mark opens at `i`: a sigil, or a percent literal where a value may start.")]
+pub fn open(spec: Spec, line: String, start: Int, i: Int) : Option[(Int, Delim)] {
+  let b = byte(line, i)
+  match spec.regex {
+    _ if spec.sigils -> if b == 126 { sigil(line, i) } else { None }
+    Some(rule) if spec.percent and b == 37 -> percent_at(rule, line, start, i)
+    _ -> None
+  }
+}
+
+#[doc("Whether a backslash escapes inside the single quotes that open at `i`: in a shell, only in `$'…'`.")]
+pub fn single_quotes_escape(spec: Spec, line: String, start: Int, i: Int) : Bool =
+  (not spec.shell_quoting) or (i > start and byte(line, i - 1) == 36)
+
+fn backslashes(line: String, start: Int, j: Int, n: Int) : Int =
+  if j > start and byte(line, j - 1) == 92 { backslashes(line, start, j - 1, n + 1) } else { n }
+
+#[doc("Whether the quote at `i` opens nothing: it names a variable (`$'`), or a backslash escapes it outside a string.")]
+pub fn quote_opens_nothing(spec: Spec, line: String, start: Int, i: Int) : Bool =
+  (spec.dollar_quotes and i > start and byte(line, i - 1) == 36)
+    or (spec.shell_quoting
+      and backslashes(
+        line,
+        start,
+        i,
+        0
+      ) %
+        2
+        == 1)

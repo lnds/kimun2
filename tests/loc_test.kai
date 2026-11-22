@@ -1,0 +1,60 @@
+import km2.languages
+import km2.lines
+import km2.lexical.bytes
+
+fn tally(ext: String, src: String) : (Int, Int, Int) = match languages.of_path("x.#{ext}") {
+  None -> (-1, -1, -1)
+  Some(spec) -> {
+    let t = lines.tally(spec, src)
+    (t.blank, t.comment, t.code)
+  }
+}
+
+test "rust: line, block and doc comments are comment lines" {
+  assert tally("rs", "// a\n/* b\n   c */\n/// d\nfn f() {}\n") == ((0, 4, 1))
+}
+
+test "rust: nested block comments close at the matching end" {
+  assert tally("rs", "/* a /* b */ still */\nlet x = 1;\n") == ((0, 1, 1))
+}
+
+test "rust: a blank line inside a string is blank, its other lines code" {
+  assert tally("rs", "const S: &str = \"one\n\ntwo\";\n") == ((1, 0, 2))
+}
+
+test "rust: a comment marker inside a string opens no comment" {
+  assert tally("rs", "let p = \"crates/*\";\nlet q = 1;\n") == ((0, 0, 2))
+}
+
+test "rust: a raw string holds quotes and comment markers" {
+  assert tally("rs", "let r = r#\"a \" // b\"#;\n// c\n") == ((0, 1, 1))
+}
+
+test "rust: a lifetime opens no string" {
+  assert tally("rs", "fn f<'a>(x: &'a str) {}\n// c\n") == ((0, 1, 1))
+}
+
+test "rust: code and comment on one line is code" {
+  assert tally("rs", "let x = 1; // one\n") == ((0, 0, 1))
+}
+
+test "kaikai: a doc attribute is comment, its blank lines included" {
+  assert tally("kai", "#[doc(\"\"\"\nOne.\n\nTwo.\n\"\"\")]\npub fn f() : Int = 1\n") == ((0, 5, 1))
+}
+
+test "kaikai: an attribute that is not doc is code" {
+  assert tally("kai", "#[constructor]\nfn f() : Int = 1\n") == ((0, 0, 2))
+}
+
+test "kaikai: a quote string ends with its line" {
+  assert tally("kai", "let s = \"open\n# comment\n") == ((0, 1, 1))
+}
+
+test "a shebang line is code and a byte order mark is no text" {
+  assert tally("kai", "\u{FEFF}#!/usr/bin/env kai\n# c\n") == ((0, 1, 1))
+}
+
+test "a NUL byte in the first 512 makes a file binary" {
+  assert bytes.is_binary("ab\u{0}cd")
+  assert not bytes.is_binary("abcd")
+}

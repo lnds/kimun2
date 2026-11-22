@@ -1,0 +1,173 @@
+# The ignore files in force at each directory of a walk, and the verdict
+# they give a path: `.ignore` first, then `.gitignore`, then the
+# repository's `info/exclude`, then the user's global excludes file; the
+# deepest file of each kind decides it. The three git sources apply only
+# inside a repository.
+
+import fs.file
+import os.env
+import path
+import km2.gitignore
+import km2.gitignore.{Matcher, Verdict, Ignored, Whitelisted, Unmatched}
+
+#[doc("The ignore files of one directory.")]
+pub type Frame = {
+  dir: String,
+  # A directory above the walk's root, matched against absolute paths.
+  above: Bool,
+  ignore: Matcher,
+  git: Matcher,
+  exclude: Matcher,
+  has_git: Bool
+}
+
+fn read_matcher(dir: String, name: String) : Matcher / File =
+  match file.read(path.join(dir, name)) {
+    Ok(text) -> gitignore.parse(dir, text)
+    Err(_) -> gitignore.empty(dir)
+  }
+
+#[doc("The ignore files a directory holds.")]
+pub fn frame(dir: String, above: Bool) : Frame / File {
+  let has_git = file.exists(path.join(dir, ".git")) or file.exists(path.join(dir, ".jj"))
+  Frame {
+    dir: dir,
+    above: above,
+    ignore: read_matcher(dir, ".ignore"),
+    git: read_matcher(dir, ".gitignore"),
+    exclude: if has_git { read_matcher(dir, ".git/info/exclude") } else { gitignore.empty(dir) },
+    has_git: has_git
+  }
+}
+
+#[doc("What a walk carries to judge a path: the frames from the path's directory up, deepest first, the global excludes, and where the root sits in absolute terms.")]
+pub type Stack = { frames: [Frame], global: Matcher, root: String, absolute_root: String }
+
+type Seen = { ignore: Verdict, git: Verdict, exclude: Verdict, saw_git: Bool }
+
+fn first(v: Verdict, m: Matcher, p: String, is_dir: Bool) : Verdict =
+  if v == Unmatched { gitignore.matched(m, p, is_dir) } else { v }
+
+fn absolute_of(s: Stack, p: String) : String {
+  let base = if s.root == "." { "./" } else { s.root ++ "/" }
+  match string.drop_prefix(p, base) {
+    Some(rest) -> path.join(s.absolute_root, rest)
+    None -> if p == s.root { s.absolute_root } else { p }
+  }
+}
+
+fn step(s: Stack, p: String, is_dir: Bool, any_git: Bool, seen: Seen, f: Frame) : Seen {
+  let candidate = if f.above { absolute_of(s, p) } else { p }
+  let git_open = any_git and (not seen.saw_git)
+  Seen {
+    ignore: first(seen.ignore, f.ignore, candidate, is_dir),
+    git: if git_open { first(seen.git, f.git, candidate, is_dir) } else { seen.git },
+    exclude: if git_open {
+      first(seen.exclude, f.exclude, candidate, is_dir)
+    } else {
+      seen.exclude
+    },
+    saw_git: seen.saw_git or f.has_git
+  }
+}
+
+#[doc("Whether the ignore files hide a path.")]
+pub fn ignored(s: Stack, p: String, is_dir: Bool) : Bool {
+  let any_git = list.any(s.frames, f => f.has_git)
+  let start = Seen { ignore: Unmatched, git: Unmatched, exclude: Unmatched, saw_git: false }
+  let seen = s.frames |> list.foldl(start, (acc, f) => step(s, p, is_dir, any_git, acc, f))
+  let global = if any_git { gitignore.matched(s.global, p, is_dir) } else { Unmatched }
+  let verdict = [seen.ignore, seen.git, seen.exclude, global] |> list.find(v => v != Unmatched)
+  verdict == Some(Ignored)
+}
+
+#[doc("The stack below a directory: its frame on top.")]
+pub fn enter(s: Stack, dir: String) : Stack / File =
+  Stack { ...s, frames: [frame(dir, false), ...s.frames] }
+
+fn unquote(v: String) : String =
+  if string.starts_with(v, "\"") and string.ends_with(v, "\"") and string.byte_length(v) >= 2 {
+    string.slice(v, 1, string.byte_length(v) - 2)
+  } else {
+    v
+  }
+
+fn expand_home(v: String, home: String) : String = match string.drop_prefix(v, "~/") {
+  Some(rest) -> path.join(home, rest)
+  None -> v
+}
+
+type GitConfigLine = { in_core: Bool, found: Option[String] }
+
+fn config_line(acc: GitConfigLine, raw: String) : GitConfigLine {
+  let line = string.trim(raw)
+  if string.starts_with(line, "[") {
+    GitConfigLine { ...acc, in_core: string.to_lower(line) == "[core]" }
+  } else if acc.in_core {
+    match string.split_once(line, "=") {
+      Some(kv) if string.to_lower(string.trim(kv.fst)) == "excludesfile" ->
+        GitConfigLine { ...acc, found: Some(unquote(string.trim(kv.snd))) }
+      _ -> acc
+    }
+  } else {
+    acc
+  }
+}
+
+fn excludes_file_in(config: String) : Option[String] / File = match file.read(config) {
+  Ok(text) -> (string.lines(text)
+    |> list.foldl(GitConfigLine { in_core: false, found: None }, config_line)).found
+  Err(_) -> None
+}
+
+fn xdg_config(home: String) : String / Env = match env.get("XDG_CONFIG_HOME") {
+  Some(x) if x != "" -> x
+  _ -> path.join(home, ".config")
+}
+
+# The global excludes file: `core.excludesFile` from the user's git
+# configuration, else `git/ignore` under the XDG configuration directory.
+fn global_path() : Option[String] / File + Env {
+  let home = env.get("HOME") ?? ""
+  let configured = match env.get("GIT_CONFIG_GLOBAL") {
+    Some(g) -> excludes_file_in(g)
+    None -> match excludes_file_in(path.join(home, ".gitconfig")) {
+      Some(found) -> Some(found)
+      None -> excludes_file_in(path.join(xdg_config(home), "git/config"))
+    }
+  }
+  match configured {
+    Some(p) -> Some(expand_home(p, home))
+    None -> if home == "" { None } else { Some(path.join(xdg_config(home), "git/ignore")) }
+  }
+}
+
+fn global_matcher() : Matcher / File + Env = match global_path() {
+  Some(p) -> match file.read(p) {
+    Ok(text) -> gitignore.parse("", text)
+    Err(_) -> gitignore.empty("")
+  }
+  None -> gitignore.empty("")
+}
+
+fn up_of(p: String) : String {
+  let d = path.dirname(p)
+  if d == "" and string.starts_with(p, "/") and p != "/" { "/" } else { d }
+}
+
+# The directories above `p`, deepest first.
+fn ancestors(p: String, acc: [String]) : [String] {
+  let up = up_of(p)
+  if up == "" or up == p { list.reverse(acc) } else { ancestors(up, [up, ...acc]) }
+}
+
+#[doc("The stack at a walk's root: the root's own frame, then the frames of the directories above it, deepest first.")]
+pub fn at_root(root: String, absolute_root: String) : Stack / File + Env {
+  let above = ancestors(absolute_root, []) | (d => frame(d, true))
+  Stack {
+    frames: [frame(root, false), ...above],
+    global: global_matcher(),
+    root: root,
+    absolute_root: absolute_root
+  }
+}

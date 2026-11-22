@@ -1,0 +1,153 @@
+# `loc`: blank, comment and code lines by language, as `km loc` counts
+# them: files deduplicated by content, binaries skipped, every format.
+
+import ahu.cli
+import fs.file
+import collections.map
+import collections.set
+import math.bits
+import time
+import km2.kinds
+import km2.kinds.{Kind, Selection, Declared, KCode, KDocs, KInfra, KData}
+import km2.languages
+import km2.languages.spec.{Spec}
+import km2.lines
+import km2.lexical.bytes
+import km2.loc_report
+import km2.loc_report.{Counts, Report, Stats}
+import km2.selection
+import km2.selection.{Filter}
+import km2.sources
+import km2.sources.{Source}
+
+const FNV_OFFSET : Int = -3750763034362895579
+
+const FNV_PRIME : Int = 1099511628211
+
+fn fnv(s: String, i: Int, n: Int, h: Int) : Int =
+  if i >= n { h } else { fnv(s, i + 1, n, bit_xor(h, string.string_byte_at_int(s, i)) * FNV_PRIME) }
+
+#[doc("km's content hash: FNV-1a 64 over the raw bytes.")]
+pub fn content_hash(src: String) : Int = fnv(src, 0, string.byte_length(src), FNV_OFFSET)
+
+#[doc("The counts of one source in a language.")]
+pub fn count_source(spec: Spec, src: String) : Counts {
+  let t = lines.tally(spec, src)
+  Counts { files: 1, blank: t.blank, comment: t.comment, code: t.code }
+}
+
+type Tally = {
+  by_language: Map[String, Counts],
+  by_kind: Map[String, Counts],
+  seen: Set[Int],
+  text_files: Int,
+  unique: Int,
+  duplicates: Int,
+  binaries: Int
+}
+
+fn bump(m: Map[String, Counts], key: String, c: Counts) : Map[String, Counts] =
+  m |> map.put(key, loc_report.add(map.get(m, key) ?? loc_report.EMPTY, c))
+
+fn count(t: Tally, s: Source) : Tally / File + Stderr {
+  let counted = Tally { ...t, text_files: t.text_files + 1 }
+  match file.read(s.path) {
+    Err(e) -> {
+      Stderr.eprint("warning: #{s.path}: #{e}\n")
+      counted
+    }
+    Ok(src) -> {
+      let h = content_hash(src)
+      if set.contains(t.seen, h) {
+        Tally { ...counted, duplicates: t.duplicates + 1 }
+      } else if bytes.is_binary(src) {
+        Tally { ...counted, seen: set.insert(t.seen, h), binaries: t.binaries + 1 }
+      } else {
+        let spec = languages.refine(s.path, s.spec, src)
+        let c = count_source(spec, src)
+        Tally {
+          ...counted,
+          seen: set.insert(t.seen, h),
+          unique: t.unique + 1,
+          by_language: bump(t.by_language, spec.name, c),
+          by_kind: bump(t.by_kind, kinds.name(s.kind), c)
+        }
+      }
+    }
+  }
+}
+
+fn report_of(t: Tally) : Report =
+  Report {
+    languages: loc_report.sort_languages(map.to_pairs(t.by_language)),
+    kinds: kinds.ALL
+      |> list.flat_map(
+        k => match map.get(t.by_kind, kinds.name(k)) {
+          Some(c) -> [(kinds.name(k), c)]
+          None -> []
+        }
+      )
+  }
+
+#[doc("Counts the source files given, in their order.")]
+pub fn count_files(files: [Source]) : (Report, Stats) / File + Stderr {
+  let start = Tally {
+    by_language: %{},
+    by_kind: %{},
+    seen: set.empty(),
+    text_files: 0,
+    unique: 0,
+    duplicates: 0,
+    binaries: 0
+  }
+  let t = files |> list.foldl(start, count)
+  (
+    report_of(t),
+    Stats {
+      text_files: t.text_files,
+      unique: t.unique,
+      duplicates: t.duplicates,
+      binaries: t.binaries,
+      seconds: 0.0
+    }
+  )
+}
+
+#[doc("Everything a run of `loc` was asked for.")]
+pub type Options = {
+  root: String,
+  format: String,
+  exclude_tests: Bool,
+  filter: Filter,
+  selection: Selection,
+  verbose: Bool,
+  list_excluded: Bool,
+  by_author: Bool
+}
+
+fn seconds_since(start: time.Instant) : Real / Clock =
+  int_to_real(time.duration_to_nanos(time.elapsed_since(start, time.monotonic()))) / 1000000000.0
+
+fn render(o: Options, r: Report, stats: Stats) : Result[String, String] = match o.format {
+  "json" -> Ok(loc_report.to_json(r))
+  "short" -> Ok(loc_report.short(r))
+  "terse" -> Ok(loc_report.terse(r))
+  "table" -> Ok(loc_report.table(r, if o.verbose { Some(stats) } else { None }))
+  _ -> Err(loc_report.CI_FORMAT_ONLY)
+}
+
+#[doc("Runs `loc` without `--by-author`: the report in the format asked, or km's error for a CI format.")]
+pub fn run(o: Options) : Result[String, String] / File + Env + Stderr + Clock {
+  let start = time.monotonic()
+  if not file.exists(o.root) {
+    Stderr.eprint(
+      "warning: #{o.root}: IO error for operation on #{o.root}: No such file or directory (os error 2)\n"
+    )
+  }
+  let (r, stats) = count_files(sources.files(o.root, o.exclude_tests, o.filter, o.selection))
+  if r.languages == [] {
+    Ok(if o.format == "json" { loc_report.EMPTY_JSON } else { loc_report.NOTHING })
+  } else {
+    render(o, r, Stats { ...stats, seconds: seconds_since(start) })
+  }
+}

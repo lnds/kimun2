@@ -1,0 +1,55 @@
+# JavaScript template literals: text, and the code of each `${…}` with the
+# braces open in it, frames that persist across lines.
+
+import km2.lexical.bytes.{byte, at, skip_until}
+
+#[doc("A level of a template literal: its text, or the code of a `${…}` with the braces open in it.")]
+pub type Frame
+  = FrameText
+  | FrameCode(Int)
+
+# The length of the quoted string that starts at `i`, to the end of the line.
+fn quoted_len(line: String, i: Int, j: Int, n: Int) : Int =
+  if j >= n or byte(line, j) == byte(line, i) {
+    if j + 1 - i < n - i { j + 1 - i } else { n - i }
+  } else {
+    quoted_len(line, i, j + (if byte(line, j) == 92 { 2 } else { 1 }), n)
+  }
+
+fn text_step(line: String, i: Int, rest: [Frame]) : (Int, [Frame]) {
+  let b = byte(line, i)
+  if b == 92 {
+    (2, [FrameText, ...rest])
+  } else if b == 96 {
+    (1, rest)
+  } else if at(line, i, "${") {
+    (2, [FrameCode(0), FrameText, ...rest])
+  } else {
+    (1, [FrameText, ...rest])
+  }
+}
+
+fn code_step(line: String, i: Int, depth: Int, rest: [Frame]) : (Int, [Frame]) {
+  let here = [FrameCode(depth), ...rest]
+  match byte(line, i) {
+    96 -> (1, [FrameText, ...here])
+    123 -> (1, [FrameCode(depth + 1), ...rest])
+    125 -> (1, if depth == 0 { rest } else { [FrameCode(depth - 1), ...rest] })
+    34 -> (quoted_len(line, i, i + 1, string.byte_length(line)), here)
+    39 -> (quoted_len(line, i, i + 1, string.byte_length(line)), here)
+    _ -> (1, here)
+  }
+}
+
+#[doc("Inside a template literal at `i`: the bytes consumed and the frames after; it closes when none is left.")]
+pub fn scan(line: String, i: Int, frames: [Frame]) : (Int, [Frame]) = match frames {
+  [FrameText, ...rest] -> text_step(line, i, rest)
+  [FrameCode(depth), ...rest] -> code_step(line, i, depth, rest)
+  [] -> (1, [])
+}
+
+#[doc("The offset from `i` below `n` where a step inside the template may do more than advance a byte.")]
+pub fn skip(line: String, i: Int, n: Int, frames: [Frame]) : Int = match frames {
+  [FrameText, ..._] -> skip_until(line, i, n, 92, 96, 36)
+  _ -> i
+}

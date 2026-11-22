@@ -1,0 +1,3 @@
+"""Doc."""
+# comment
+def f() -> str: ...

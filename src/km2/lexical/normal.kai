@@ -1,0 +1,156 @@
+# One step in normal state, in km's order: a literal, a quote that opens
+# none, a regular expression, a heredoc marker; then a documentation
+# attribute, a pragma, a block comment, a line comment; else one byte.
+
+import km2.languages.spec.{Spec}
+import km2.lexical.bytes.{byte, at, at_folded, is_space, is_word, one_of, find}
+import km2.lexical.characters
+import km2.lexical.heredoc
+import km2.lexical.literals
+import km2.lexical.regex
+import km2.lexical.state.{State, Step, StNormal, StString, StBlock, StDoc, StDocString, code_step, comment_step, plain_step, LINE_COMMENT}
+
+fn opened(spec: Spec, width: Int, l: literals.Literal) : Step =
+  if spec.triple_comments and literals.is_triple(l) {
+    comment_step(width, StDocString(l))
+  } else {
+    code_step(width, StString(l))
+  }
+
+# `?"`, `?'` and `?\x` are the code of a character, unless a value precedes.
+fn char_code_len(spec: Spec, line: String, i: Int) : Option[Int] =
+  if spec.char_codes and byte(line, i) == 63 { char_code_at(line, i) } else { None }
+
+fn char_code_width(next: Int, after: Int) : Int = match next {
+  34 -> 2
+  39 -> 2
+  92 -> if after >= 0 { 3 } else { 0 }
+  _ -> 0
+}
+
+fn char_code_at(line: String, i: Int) : Option[Int] {
+  let before = byte(line, i - 1)
+  let after_value = is_word(before) or before == 41 or before == 93
+  let len = char_code_width(byte(line, i + 1), byte(line, i + 2))
+  if len > 0 and (not after_value) { Some(len) } else { None }
+}
+
+fn regex_len(spec: Spec, line: String, i: Int) : Option[Int] = match spec.regex {
+  Some(rule) if byte(line, i) == 47 -> regex.width(rule, line, i)
+  _ -> None
+}
+
+# A character literal or a lifetime where `'` opens no string, the code of
+# a quote character, or a regular expression.
+fn quote_as_code(spec: Spec, line: String, i: Int) : Option[Int] =
+  if byte(line, i) == 39 and (not spec.single_quotes) {
+    Some(1 + characters.character_len(line, i + 1))
+  } else {
+    match char_code_len(spec, line, i) {
+      Some(w) -> Some(w)
+      None -> regex_len(spec, line, i)
+    }
+  }
+
+fn heredoc_step(spec: Spec, line: String, i: Int) : Option[Step] = match spec.heredocs {
+  Some(flavor) if byte(line, i) == 60 ->
+    heredoc.open(flavor, line, i)
+      |> option.map(found => {
+        let (h, width) = found
+        Step { ...code_step(width, StNormal), heredoc: Some(h) }
+      })
+  _ -> None
+}
+
+fn literal_step(spec: Spec, line: String, i: Int) : Option[Step] = match literals.open(
+  spec,
+  line,
+  0,
+  i
+) {
+  Some((width, l)) -> Some(opened(spec, width, l))
+  None -> match quote_as_code(spec, line, i) {
+    Some(width) -> Some(code_step(width, StNormal))
+    None -> heredoc_step(spec, line, i)
+  }
+}
+
+#[doc("Whether a directive of the language follows at `from`, in any case.")]
+pub fn is_directive(spec: Spec, line: String, from: Int) : Bool =
+  list.any(spec.directives, d => at_folded(line, from, d))
+
+fn hash_is_code(spec: Spec, line: String, i: Int) : Bool {
+  let before = byte(line, i - 1)
+  (spec.hash_at_word_start and before >= 0 and (not one_of(" \t;&|()", before)))
+    or (spec.dollar_hash and before == 36)
+}
+
+fn opens_line_comment(spec: Spec, line: String, i: Int, marker: String) : Bool {
+  let after = i + string.byte_length(marker)
+  not (one_of(spec.not_before, byte(line, after))
+    or is_directive(spec, line, after)
+    or ((spec.hash_at_word_start or spec.dollar_hash)
+      and marker == "#"
+      and hash_is_code(
+        spec,
+        line,
+        i
+      )))
+}
+
+fn first_doc(docs: [(String, String)], line: String, i: Int) : Option[(String, String)] =
+  match docs {
+    [] -> None
+    [(open, close), ...rest] ->
+      if at(line, i, open) { Some((open, close)) } else { first_doc(rest, line, i) }
+  }
+
+fn pragma_step(spec: Spec, line: String, i: Int) : Option[Step] = match spec.pragma {
+  Some((open, close)) if at(line, i, open) -> {
+    let found = find(line, i + string.byte_length(open), close)
+    let end = if found < 0 { string.byte_length(line) } else { found + string.byte_length(close) }
+    Some(code_step(end - i, StNormal))
+  }
+  _ -> None
+}
+
+fn block_at(block: Option[(String, String)], line: String, i: Int) : Option[Step] = match block {
+  Some((open, close)) if at(line, i, open) ->
+    Some(comment_step(string.byte_length(open), StBlock(open, close, 1)))
+  _ -> None
+}
+
+# Every marker at `i` is tried: one that a following byte makes no comment
+# leaves the others to open one.
+fn opens_any(spec: Spec, markers: [String], line: String, i: Int) : Bool = match markers {
+  [] -> false
+  [m, ...rest] ->
+    (at(line, i, m) and opens_line_comment(spec, line, i, m)) or opens_any(spec, rest, line, i)
+}
+
+fn line_comment_step(spec: Spec, line: String, i: Int) : Option[Step] =
+  if opens_any(spec, spec.line_comments, line, i) { Some(LINE_COMMENT) } else { None }
+
+fn comment_open(spec: Spec, line: String, i: Int) : Option[Step] =
+  match first_doc(spec.doc_attributes, line, i) {
+    Some((open, close)) -> Some(comment_step(string.byte_length(open), StDoc(close, None)))
+    None -> match pragma_step(spec, line, i) {
+      Some(s) -> Some(s)
+      None -> match block_at(spec.block_comment, line, i) {
+        Some(s) -> Some(s)
+        None -> match block_at(spec.other_block, line, i) {
+          Some(s) -> Some(s)
+          None -> line_comment_step(spec, line, i)
+        }
+      }
+    }
+  }
+
+#[doc("One step in normal state at `i`.")]
+pub fn step(spec: Spec, line: String, i: Int) : Step = match literal_step(spec, line, i) {
+  Some(s) -> s
+  None -> match comment_open(spec, line, i) {
+    Some(s) -> s
+    None -> plain_step(not is_space(byte(line, i)))
+  }
+}

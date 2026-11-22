@@ -1,21 +1,38 @@
 import km2.cli
 
-fn quiet(argv: [String]) : (Int, [String]) = handle {
-  cli.dispatch(argv)
+type Run = { code: Int, out: [String], err: [String] }
+
+fn quiet(argv: [String]) : Run = handle {
+  handle {
+    cli.run(argv)
+  } with Stdout([]) {
+    print(s, resume) -> resume((), [...state, s])
+    return(code) -> (code, state)
+  }
 } with Stderr([]) {
   eprint(s, resume) -> resume((), [...state, s])
   is_tty(resume) -> resume(false, state)
-  return(code) -> (code, state)
+  return(pair) -> {
+    let (code, out) = pair
+    Run { code: code, out: out, err: state }
+  }
 }
 
-test "an unimplemented command fails naming it" {
-  let (code, lines) = quiet(["cycom"])
-  assert code == cli.USAGE_ERROR
-  assert lines == ["km2: command not implemented yet: cycom"]
+test "an unknown command is a usage error naming it" {
+  let r = quiet(["cycom"])
+  assert r.code == cli.USAGE_ERROR
+  assert r.err == ["error: unknown command `cycom`\n"]
 }
 
-test "no command prints the usage" {
-  let (code, lines) = quiet([])
-  assert code == cli.USAGE_ERROR
-  assert lines == ["usage: km2 <command> [args...]"]
+test "no command prints the help on stderr, as km does" {
+  let r = quiet([])
+  assert r.code == cli.USAGE_ERROR
+  assert r.out == []
+  assert length(r.err) == 1
+}
+
+test "--version prints the version" {
+  let r = quiet(["--version"])
+  assert r.code == 0
+  assert r.out == ["km2 #{cli.VERSION}\n"]
 }

@@ -1,0 +1,201 @@
+# The languages km knows, in km's order: every lookup by file name,
+# extension or shebang takes the first that matches.
+
+import km2.languages.spec.{Spec, Language, ValueStart, TicksRaw, TicksTemplate, HereShell, HereRuby, HerePhp, HerePerl}
+
+import km2.languages.build.{known, known_by, data, line, not_before, block, other_block, nested, pragma, docs, directives, no_escapes, single_quotes, triple, spans, backticks, raw, heredocs, regex, marks, quoting}
+
+const SCRIPT_VALUES : ValueStart = ValueStart {
+  operators: "(,=:[!&|?{};+-*%<>~^",
+  words: ["return", "typeof", "case", "in", "of"],
+  arguments: false,
+  interpolates: false
+}
+
+# `:` and `?` take the byte after them in Ruby (`:%`, `?/`).
+const RUBY_VALUES : ValueStart = ValueStart {
+  operators: "(,=[!&|{};+-*%<>~^",
+  words: ["when", "if", "unless", "elsif", "while", "until", "and", "or", "not", "return"],
+  arguments: true,
+  interpolates: true
+}
+
+const ELIXIR_DOCS : [(String, String)] = [
+  ("@moduledoc \"\"\"", "\"\"\""),
+  ("@moduledoc ~S\"\"\"", "\"\"\""),
+  ("@moduledoc ~s\"\"\"", "\"\"\""),
+  ("@moduledoc '''", "'''"),
+  ("@doc \"\"\"", "\"\"\""),
+  ("@doc ~S\"\"\"", "\"\"\""),
+  ("@doc ~s\"\"\"", "\"\"\""),
+  ("@doc '''", "'''")
+]
+
+fn c_like(s: Spec) : Spec = s |> line(["//"]) |> block("/*", "*/")
+
+fn hash(s: Spec) : Spec = s |> line(["#"])
+
+fn script(s: Spec) : Spec =
+  s |> c_like |> single_quotes |> backticks(TicksTemplate) |> regex(SCRIPT_VALUES)
+
+fn shell(name: String, program: String) : Language =
+  known_by(
+    name,
+    [program],
+    [],
+    [program],
+    s => (s |> hash |> single_quotes |> spans |> heredocs(HereShell) |> quoting(false, true, false))
+  )
+
+fn markup(s: Spec) : Spec = s |> block("<!--", "-->") |> single_quotes
+
+fn elixir(s: Spec) : Spec =
+  s
+    |> hash
+    |> single_quotes
+    |> triple(false)
+    |> spans
+    |> docs(ELIXIR_DOCS)
+    |> marks(true, false, true)
+
+fn fortran(s: Spec) : Spec =
+  s |> line(["!"]) |> single_quotes |> no_escapes |> directives("", ["$omp", "$acc", "$ "])
+
+fn jvm(s: Spec) : Spec = s |> c_like |> single_quotes |> triple(false)
+
+fn nested_c(s: Spec) : Spec = s |> c_like |> nested
+
+fn hash_data(s: Spec) : Spec = s |> hash |> data
+
+fn ruby(s: Spec) : Spec =
+  s
+    |> hash
+    |> single_quotes
+    |> spans
+    |> heredocs(HereRuby)
+    |> regex(RUBY_VALUES)
+    |> marks(false, true, true)
+    |> quoting(true, false, false)
+
+fn php(s: Spec) : Spec =
+  s |> c_like |> line(["//", "#"]) |> not_before("[") |> single_quotes |> spans |> heredocs(HerePhp)
+
+fn haskell(s: Spec) : Spec =
+  s
+    |> line(["--"])
+    |> not_before("!#$%&*+./<=>?@\\^|~")
+    |> block("{-", "-}")
+    |> nested
+    |> pragma("{-#", "#-}")
+
+fn perl(s: Spec) : Spec =
+  s |> hash |> single_quotes |> spans |> heredocs(HerePerl) |> quoting(true, false, true)
+
+fn pascal(s: Spec) : Spec =
+  s
+    |> line(["//"])
+    |> block("{", "}")
+    |> other_block("(*", "*)")
+    |> single_quotes
+    |> pragma("{$", "}")
+    |> no_escapes
+
+#[doc("Every language km knows, in km's order.")]
+pub const LANGUAGES : [Language] = [
+  known("Rust", ["rs"], s => (s |> nested_c |> raw(true, false, false) |> spans)),
+  known_by(
+    "Python",
+    ["py", "pyi"],
+    [],
+    ["python", "python3"],
+    s => (s |> hash |> single_quotes |> triple(true))
+  ),
+  known_by("JavaScript", ["js", "mjs", "cjs"], [], ["node"], script),
+  known("JSX", ["jsx"], script),
+  known("TypeScript", ["ts", "tsx", "mts", "cts"], script),
+  known("Java", ["java"], s => (s |> c_like |> triple(false))),
+  known("C", ["c", "h"], c_like),
+  known(
+    "C++",
+    ["cpp", "cxx", "cc", "c++", "hpp", "hxx", "hh", "h++", "inl", "ipp", "tpp"],
+    s => (s |> c_like |> raw(false, true, false))
+  ),
+  known("C#", ["cs"], s => (s |> c_like |> triple(false) |> raw(false, false, true))),
+  known("Go", ["go"], s => (s |> c_like |> backticks(TicksRaw))),
+  known_by("Ruby", ["rb"], ["Rakefile", "Gemfile"], ["ruby"], ruby),
+  shell("Bourne Shell", "sh"),
+  shell("Bourne Again Shell", "bash"),
+  shell("Zsh", "zsh"),
+  known("HTML", ["html", "htm"], markup),
+  known("CSS", ["css"], s => (s |> block("/*", "*/") |> single_quotes)),
+  known("SQL", ["sql"], s => (s |> line(["--"]) |> block("/*", "*/") |> single_quotes)),
+  known("TOML", ["toml"], hash_data),
+  known("YAML", ["yaml", "yml"], hash_data),
+  known("JSON", ["json"], data),
+  known("Markdown", ["md", "markdown"], data),
+  known("Kotlin", ["kt", "kts"], s => (s |> nested_c |> triple(false))),
+  known("Swift", ["swift"], s => (s |> nested_c |> triple(false))),
+  known("PHP", ["php"], php),
+  known("Dart", ["dart"], jvm),
+  known("Haskell", ["hs"], haskell),
+  known_by(
+    "Lua",
+    ["lua"],
+    [],
+    ["lua"],
+    s => (s |> line(["--"]) |> block("--[[", "]]") |> single_quotes)
+  ),
+  known_by("Perl", ["pl", "pm"], [], ["perl"], perl),
+  known_by("R", ["r", "R"], [], ["Rscript"], s => (s |> hash |> single_quotes)),
+  known("Scala", ["scala", "sc", "sbt"], s => (s |> nested_c |> triple(false))),
+  known(
+    "XML",
+    ["xml", "xsl", "xslt", "svg", "fsproj", "csproj", "vbproj", "vcxproj", "sln", "plist", "xaml"],
+    s => (s |> markup |> data)
+  ),
+  known_by("Dockerfile", [], ["Dockerfile"], [], hash),
+  known_by("Makefile", ["mk"], ["Makefile", "makefile", "GNUmakefile"], [], hash),
+  known_by("Elixir", ["ex"], [], ["elixir"], elixir),
+  known("Elixir Script", ["exs"], elixir),
+  known("Clojure", ["clj", "cljs", "cljc", "edn"], s => (s |> line([";"]))),
+  known("Zig", ["zig"], s => (s |> line(["//"]))),
+  known(
+    "Kaikai",
+    ["kai"],
+    s => (s |> hash |> not_before("[") |> triple(false) |> docs([("#[doc(", ")]")]))
+  ),
+  known("Objective-C", ["m", "mm"], c_like),
+  known("OCaml", ["ml", "mli"], s => (s |> block("(*", "*)") |> nested)),
+  known("F#", ["fs", "fsi", "fsx"], s => (s |> line(["//"]) |> block("(*", "*)") |> nested)),
+  known("Nim", ["nim"], s => (s |> hash |> block("#[", "]#") |> nested)),
+  known_by("Julia", ["jl"], [], ["julia"], s => (s |> hash |> block("#=", "=#") |> nested)),
+  known("Terraform", ["tf"], s => (s |> hash |> block("/*", "*/"))),
+  known("Groovy", ["groovy"], jvm),
+  known("Gradle", ["gradle"], jvm),
+  known("Erlang", ["erl", "hrl"], s => (s |> line(["%"]))),
+  known(
+    "HTML EEx",
+    ["heex"],
+    s => (s |> line(["<% #"]) |> block("<%!--", "--%>") |> single_quotes)
+  ),
+  known("EEx", ["eex"], s => (s |> block("<%#", "%>"))),
+  known_by("CMake", ["cmake"], ["CMakeLists.txt"], [], hash),
+  known("reStructuredText", ["rst", "rest"], s => (s |> line([".."]) |> data)),
+  known("yacc", ["y", "yacc"], c_like),
+  known("lex", ["l", "lex"], s => (s |> block("/*", "*/"))),
+  known("jq", ["jq"], hash),
+  known("PO File", ["po", "pot"], hash_data),
+  known("DOS Batch", ["bat", "cmd"], s => (s |> line(["::", "rem ", "REM ", "Rem "]))),
+  known("Properties", ["properties"], hash_data),
+  known(
+    "Fortran 77",
+    ["f", "F", "for", "FOR", "ftn", "FTN", "f77", "F77", "pfo"],
+    s => (s |> fortran |> directives("Cc*", ["$omp", "$acc", "$ "]))
+  ),
+  known("Fortran 90", ["f90", "F90"], fortran),
+  known("Fortran 95", ["f95", "F95"], fortran),
+  known("Fortran 2003", ["f03", "F03"], fortran),
+  known("Fortran 2008", ["f08", "F08"], fortran),
+  known("Pascal", ["pas", "dpr", "dpk", "lpr", "pp", "pascal"], pascal),
+  known("Text", ["txt"], data)
+]

@@ -1,0 +1,148 @@
+# Rust module files declared under `#[cfg(test)]` (`#[cfg(test)] mod
+# tests;`), which km leaves out with tests: the file the declaration names
+# and everything under its directory.
+
+import path
+import km2.rust_literals
+
+type Ends = { braces: Int, parens: Int, where_clause: Bool }
+
+fn close_brace(e: Ends, from: Int, at: Int) : Result[Ends, Int] =
+  if e.braces == 0 {
+    Err(if at - 1 > from { at - 1 } else { from })
+  } else if e.braces == 1 {
+    Err(at)
+  } else {
+    Ok(Ends { ...e, braces: e.braces - 1 })
+  }
+
+fn after_char(c: Char, e: Ends, from: Int, at: Int) : Result[Ends, Int] = match c {
+  '(' -> Ok(Ends { ...e, parens: e.parens + 1 })
+  '[' -> Ok(Ends { ...e, parens: e.parens + 1 })
+  ')' -> Ok(Ends { ...e, parens: if e.parens > 0 { e.parens - 1 } else { 0 } })
+  ']' -> Ok(Ends { ...e, parens: if e.parens > 0 { e.parens - 1 } else { 0 } })
+  '{' -> Ok(Ends { ...e, braces: e.braces + 1 })
+  '}' -> close_brace(e, from, at)
+  _ -> Ok(e)
+}
+
+# The depths after a line, or the line where the item ends on it.
+fn scan_line(cs: [Char], e: Ends, from: Int, at: Int) : Result[Ends, Int] = match cs {
+  [] -> Ok(e)
+  [c, ...rest] -> scan_line(rest, after_char(c, e, from, at)!, from, at)
+}
+
+# Where the item starting at line `from` ends: its braces balanced, or
+# its `;` (or `,` outside a where clause) at depth zero.
+fn item_end(lines: [String], from: Int, at: Int, e: Ends) : Int = match lines {
+  [] -> at - 1
+  [line, ...rest] -> match scan_line(string.chars(line), e, from, at) {
+    Err(end) -> end
+    Ok(after) -> {
+      let w = after.where_clause or string.starts_with(string.trim_left(line), "where")
+      let t = string.trim_right(line)
+      let closed = after.braces == 0
+        and after.parens == 0
+        and (string.ends_with(t, ";") or (string.ends_with(t, ",") and (not w)))
+      if closed { at } else { item_end(rest, from, at + 1, Ends { ...after, where_clause: w }) }
+    }
+  }
+}
+
+fn word_char(c: Char) : Bool = char.is_alnum(c)
+
+# The module an item declares without a body: `mod name;`.
+fn declared(item: String) : Option[String] {
+  let body = string.drop_suffix(string.trim_right(item), ";")!
+  let i = string.last_index_of(body, "mod ")!
+  let before_ok = i == 0 or (not word_char(string.char_at(body, i - 1) ?? ' '))
+  let name = string.trim(string.slice(body, i + 4, string.byte_length(body) - i - 4))
+  if before_ok and name != "" and list.all(string.chars(name), word_char) {
+    Some(name)
+  } else {
+    None
+  }
+}
+
+fn path_attribute(lines: [String]) : Option[String] = match lines {
+  [] -> None
+  [l, ...rest] ->
+    if string.starts_with(string.trim_left(l), "#[path") {
+      match string.split(l, "\"") {
+        [_, inside, _, ..._] -> Some(inside)
+        _ -> path_attribute(rest)
+      }
+    } else {
+      path_attribute(rest)
+    }
+}
+
+fn stem_of(file_name: String) : String = match string.last_index_of(file_name, ".") {
+  Some(i) if i > 0 -> string.slice(file_name, 0, i)
+  _ -> file_name
+}
+
+fn module_dir(declaring: String) : String {
+  let parent = path.dirname(declaring)
+  let stem = stem_of(path.basename(declaring))
+  if list.contains(["lib", "main", "mod"], stem) or path.basename(parent) == "bin" {
+    parent
+  } else {
+    path.join(parent, stem)
+  }
+}
+
+fn candidates(declaring: String, original: [String], name: String) : [String] =
+  match path_attribute(original) {
+    Some(p) -> [path.join(path.dirname(declaring), p)]
+    None -> {
+      let d = module_dir(declaring)
+      [path.join(d, name ++ ".rs"), path.join(d, name ++ "/mod.rs")]
+    }
+  }
+
+fn items(code: [String], original: [String], i: Int, acc: [([String], [String])]) : [(
+  [String],
+  [String]
+)] =
+  match code {
+    [] -> list.reverse(acc)
+    [line, ...rest] ->
+      if string.starts_with(string.trim_left(line), "#[cfg(test)]") {
+        let n = item_end(code, i, i, Ends { braces: 0, parens: 0, where_clause: false }) - i + 1
+        items(list.drop(code, n), list.drop(original, n), i + n, [
+          (list.take(code, n), list.take(original, n)),
+          ...acc
+        ])
+      } else {
+        items(rest, list.drop(original, 1), i + 1, acc)
+      }
+  }
+
+#[doc("The files a Rust source declares as `#[cfg(test)]` modules, among the paths given.")]
+pub fn test_modules(declaring: String, src: String, walked: [String]) : [String] =
+  if not string.contains(src, "#[cfg(test)]") {
+    []
+  } else {
+    let original = string.lines(src)
+    items(rust_literals.code_lines(src), original, 0, [])
+      || (it => {
+        let (code, text) = it
+        match declared(string.join(code, "\n")) {
+          Some(name) ->
+            candidates(declaring, text, name) |> list.filter(c => list.contains(walked, c))
+          None -> []
+        }
+      })
+  }
+
+#[doc("Whether a file is a test module or lies under one's directory.")]
+pub fn in_test_module(p: String, modules: [String]) : Bool =
+  list.any(modules, m => {
+    let d = if path.basename(m) == "mod.rs" {
+      path.dirname(m)
+    } else {
+      path.join(path.dirname(m), stem_of(path.basename(m)))
+    }
+    p == m or string.starts_with(p, d ++ "/")
+  })

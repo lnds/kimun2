@@ -1,0 +1,52 @@
+# A literal closed by a fixed delimiter, and one step inside it.
+
+import km2.lexical.bytes.{byte, at, skip_until}
+
+#[doc("A literal closed by a fixed delimiter: whether a backslash escapes, whether the delimiter doubled stands for itself, whether it may run past its line, and the bracket that nests in it with how many are open.")]
+pub type Delim = {
+  close: String,
+  escapes: Bool,
+  doubled: Bool,
+  spans: Bool,
+  nests: Option[(Int, Int)]
+}
+
+#[doc("A literal closed by `close`, with no doubling and no nesting.")]
+pub fn delimited(close: String, escapes: Bool, spans: Bool) : Delim =
+  Delim { close: close, escapes: escapes, doubled: false, spans: spans, nests: None }
+
+# Whether the close at `i` closes the literal, and the nesting after `i`:
+# a nested bracket opens one more, and a close inside one closes it.
+fn step_closes(line: String, i: Int, d: Delim) : (Bool, Delim) {
+  let closes = at(line, i, d.close)
+  match d.nests {
+    Some((open, depth)) if byte(line, i) == open ->
+      (false, Delim { ...d, nests: Some((open, depth + 1)) })
+    Some((open, depth)) if closes and depth > 0 ->
+      (false, Delim { ...d, nests: Some((open, depth - 1)) })
+    _ -> (closes, d)
+  }
+}
+
+#[doc("Inside a delimited literal at `i`: the bytes consumed, whether it closed, and the literal after.")]
+pub fn scan(line: String, i: Int, d: Delim) : (Int, Bool, Delim) {
+  let len = string.byte_length(d.close)
+  let (closes, after) = step_closes(line, i, d)
+  if d.escapes and byte(line, i) == 92 {
+    (2, false, after)
+  } else if closes and d.doubled and at(line, i + len, d.close) {
+    (2 * len, false, after)
+  } else {
+    (if closes { len } else { 1 }, closes, after)
+  }
+}
+
+#[doc("The offset from `i` below `n` where a step inside the literal may do more than advance a byte.")]
+pub fn skip(line: String, i: Int, n: Int, d: Delim) : Int {
+  let escape = if d.escapes { 92 } else { -1 }
+  let open = match d.nests {
+    Some((o, _)) -> o
+    None -> -1
+  }
+  skip_until(line, i, n, escape, byte(d.close, 0), open)
+}

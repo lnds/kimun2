@@ -1,0 +1,133 @@
+# What each file is for: code, documentation, infrastructure or data, by
+# language and path, as km tells them.
+
+import fs.file
+import km2.glob
+import km2.glob.{Glob}
+
+#[doc("What a file is for, in km's order.")]
+pub type Kind = KCode | KDocs | KInfra | KData
+
+#[doc("Every kind, in km's order.")]
+pub const ALL : [Kind] = [KCode, KDocs, KInfra, KData]
+
+#[doc("The kind's name as km prints it.")]
+pub fn name(k: Kind) : String = match k {
+  KCode -> "code"
+  KDocs -> "docs"
+  KInfra -> "infra"
+  KData -> "data"
+}
+
+#[doc("The kind a `--kind` value names; `all` names every kind.")]
+pub fn parse(value: String) : Option[[Kind]] = match value {
+  "code" -> Some([KCode])
+  "docs" -> Some([KDocs])
+  "infra" -> Some([KInfra])
+  "data" -> Some([KData])
+  "all" -> Some(ALL)
+  _ -> None
+}
+
+#[doc("The globs `.kimun.toml` declares for one kind.")]
+pub type Declared = { kind: Kind, globs: [Glob] }
+
+#[doc("Which kinds a run reads, and the kinds declared by glob.")]
+pub type Selection = { chosen: Option[[Kind]], declared: [Declared] }
+
+#[doc("Whether a run reads files of kind `k`: every kind unless `--kind` chose some.")]
+pub fn reads(s: Selection, k: Kind) : Bool = match s.chosen {
+  None -> true
+  Some(ks) -> list.contains(ks, k)
+}
+
+const INFRA_YAML_NAMES : [String] = [
+  ".gitlab-ci.yml",
+  ".travis.yml",
+  "azure-pipelines.yml",
+  "bitbucket-pipelines.yml",
+  "cloudbuild.yaml",
+  "buildspec.yml",
+  "Chart.yaml",
+  "kustomization.yaml",
+  "kustomization.yml"
+]
+
+const INFRA_YAML_DIRS : [String] =
+  [".circleci", "playbooks", "group_vars", "host_vars", "tasks", "handlers"]
+
+fn workflows(dirs: [String]) : Bool = match dirs {
+  [".github", "workflows", ..._] -> true
+  [_, ...rest] -> workflows(rest)
+  [] -> false
+}
+
+fn compose(file_name: String) : Bool =
+  (string.starts_with(file_name, "docker-compose") or string.starts_with(file_name, "compose."))
+    and (string.ends_with(file_name, ".yml") or string.ends_with(file_name, ".yaml"))
+
+fn components(path: String) : [String] =
+  string.split(path, "/") |> list.filter(c => c != "" and c != ".")
+
+# A YAML file whose name or directories say it configures infrastructure.
+fn infra_yaml_path(path: String) : Bool {
+  let parts = components(path)
+  let file_name = list.last(parts) ?? ""
+  let dirs = list.init(parts) ?? []
+  list.contains(INFRA_YAML_NAMES, file_name)
+    or compose(file_name)
+    or workflows(dirs)
+    or list.any(dirs, d => list.contains(INFRA_YAML_DIRS, d))
+}
+
+fn starts_any(lines: [String], prefixes: [String]) : Bool =
+  list.any(lines, l => list.any(prefixes, p => string.starts_with(l, p)))
+
+fn first_content(lines: [String]) : Option[String] =
+  list.find(lines, l => {
+    let t = string.trim_right(l)
+    t != "" and (not string.starts_with(t, "#")) and t != "---"
+  })
+
+# A YAML document that is a Kubernetes manifest, a CloudFormation template
+# or an Ansible playbook, by its first 64 lines.
+fn holds_infra(src: String) : Bool {
+  let lines = string.lines(src) |> list.take(64)
+  let kubernetes = starts_any(lines, ["apiVersion:"]) and starts_any(lines, ["kind:"])
+  let playbook = match first_content(lines) {
+    Some(l) -> string.starts_with(l, "- ") and starts_any(lines, ["- hosts:", "  hosts:"])
+    None -> false
+  }
+  kubernetes or starts_any(lines, ["AWSTemplateFormatVersion:"]) or playbook
+}
+
+fn by_language(path: String, language: String, is_code: Bool) : Kind =
+  if list.contains(["Markdown", "reStructuredText", "Text"], language) {
+    KDocs
+  } else if language == "Terraform" or language == "Dockerfile" {
+    KInfra
+  } else if language == "YAML" and infra_yaml_path(path) {
+    KInfra
+  } else if is_code {
+    KCode
+  } else {
+    KData
+  }
+
+fn read_text(path: String) : String / File = ok(file.read(path)) ?? ""
+
+#[doc("The kind of a file: by `[kinds]` globs over its path relative to the root, else by its language and path.")]
+pub fn of(
+  s: Selection,
+  path: String,
+  relative: String,
+  language: String,
+  is_code: Bool
+) : Kind / File =
+  match list.find(s.declared, d => list.any(d.globs, g => glob.matches(g, relative))) {
+    Some(d) -> d.kind
+    None -> {
+      let k = by_language(path, language, is_code)
+      if k == KData and language == "YAML" and holds_infra(read_text(path)) { KInfra } else { k }
+    }
+  }

@@ -1,0 +1,39 @@
+# The state a line hands to the next, and one step of the classifier.
+
+import km2.lexical.literals.{Literal}
+import km2.lexical.heredoc.{Heredoc}
+
+#[doc("Where the classifier is between two bytes.")]
+pub type State
+  = StNormal
+  | StString(Literal)
+  | StBlock(String, String, Int)
+  | StDoc(String, Option[Literal])
+  | StDocString(Literal)
+  | StHeredoc(Heredoc)
+
+#[doc("One step along a line: bytes consumed, the state after, what was seen, whether the rest of the line is a line comment, and a heredoc marked on the line.")]
+pub type Step = {
+  advance: Int,
+  state: State,
+  code: Bool,
+  comment: Bool,
+  stop: Bool,
+  heredoc: Option[Heredoc]
+}
+
+#[doc("A step over code.")]
+pub fn code_step(advance: Int, state: State) : Step =
+  Step { advance: advance, state: state, code: true, comment: false, stop: false, heredoc: None }
+
+#[doc("A step over one byte in normal state that opens nothing: code unless it is space.")]
+pub fn plain_step(code: Bool) : Step =
+  Step { advance: 1, state: StNormal, code: code, comment: false, stop: false, heredoc: None }
+
+#[doc("A step over comment.")]
+pub fn comment_step(advance: Int, state: State) : Step =
+  Step { advance: advance, state: state, code: false, comment: true, stop: false, heredoc: None }
+
+#[doc("The step of a line comment: the rest of the line.")]
+pub const LINE_COMMENT : Step =
+  Step { advance: 0, state: StNormal, code: false, comment: true, stop: true, heredoc: None }

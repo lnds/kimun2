@@ -1,0 +1,22 @@
+loc ../kimun/src
+loc --include-tests ../kimun/src
+loc -v --include-tests ../kimun/src
+loc --format short ../kimun
+loc --format terse ../kimun
+loc --list-excluded ../kimun
+loc --list-excluded --include-tests ../kimun
+loc --kind docs ../kimun
+loc --kind code,docs ../kimun
+loc --exclude-dir src ../kimun
+loc -E *.md ../kimun
+loc --include-ext rs ../kimun
+loc --exclude-ext md --exclude-ext js ../kimun
+loc ../kimun/src/loc/mod.rs
+loc ../kimun/src/walk_test.rs
+loc --format github fixtures/empty
+loc --format json fixtures/empty
+loc fixtures/empty
+loc --by-author ../kimun/src/loc
+loc --by-author --format short ../kimun/src
+loc --by-author --format terse ../minerva
+loc --by-author fixtures/empty
