@@ -1,0 +1,109 @@
+# Where string literals open, by what a language writes, and each step
+# inside one. Openers read the line between `start` and `i` as what comes
+# before; a documentation attribute opens its strings with nothing before.
+
+import km2.languages.spec.{Spec, TicksRaw, TicksTemplate}
+import km2.lexical.bytes.{byte, at}
+import km2.lexical.delim
+import km2.lexical.delim.{Delim, delimited}
+import km2.lexical.marked
+import km2.lexical.raw
+import km2.lexical.template
+import km2.lexical.template.{Frame, FrameText}
+
+#[doc("A literal being read: closed by a delimiter, or a template literal with its frames.")]
+pub type Literal
+  = LitDelim(Delim)
+  | LitTemplate([Frame])
+
+type Opened = Option[(Int, Literal)]
+
+fn lit(o: Option[(Int, Delim)]) : Opened = match o {
+  Some((w, d)) -> Some((w, LitDelim(d)))
+  None -> None
+}
+
+fn triple_at(spec: Spec, line: String, i: Int) : Bool =
+  at(line, i, "\"\"\"") or (spec.single_quotes and at(line, i, "'''"))
+
+fn triple(spec: Spec, line: String, i: Int) : Opened =
+  if spec.triple_quotes and triple_at(spec, line, i) {
+    lit(Some((3, delimited(string.slice(line, i, 3), spec.escapes, true))))
+  } else {
+    None
+  }
+
+fn backtick(spec: Spec) : Option[Literal] = match spec.backticks {
+  TicksRaw -> Some(LitDelim(delimited("`", false, true)))
+  TicksTemplate -> Some(LitTemplate([FrameText]))
+  _ -> None
+}
+
+fn single(spec: Spec, line: String, start: Int, i: Int) : Option[Literal] =
+  if spec.single_quotes {
+    let escapes = spec.escapes and marked.single_quotes_escape(spec, line, start, i)
+    Some(LitDelim(delimited("'", escapes, spec.quotes_span_lines)))
+  } else {
+    None
+  }
+
+fn quote(spec: Spec, line: String, start: Int, i: Int) : Option[Literal] = match byte(line, i) {
+  34 -> Some(LitDelim(delimited("\"", spec.escapes, spec.quotes_span_lines)))
+  39 -> single(spec, line, start, i)
+  96 -> backtick(spec)
+  _ -> None
+}
+
+fn quoted(spec: Spec, line: String, start: Int, i: Int) : Opened = match quote(
+  spec,
+  line,
+  start,
+  i
+) {
+  Some(l) if not marked.quote_opens_nothing(spec, line, start, i) -> Some((1, l))
+  _ -> None
+}
+
+#[doc("The literal that opens at `i`, with the width of its opening.")]
+pub fn open(spec: Spec, line: String, start: Int, i: Int) : Option[(Int, Literal)] = match lit(
+  raw.open(spec, line, start, i)
+) {
+  Some(o) -> Some(o)
+  None -> match lit(marked.open(spec, line, start, i)) {
+    Some(o) -> Some(o)
+    None -> match triple(spec, line, i) {
+      Some(o) -> Some(o)
+      None -> quoted(spec, line, start, i)
+    }
+  }
+}
+
+#[doc("Whether a literal is triple-quoted, as docstrings are.")]
+pub fn is_triple(l: Literal) : Bool = match l {
+  LitDelim(d) -> string.byte_length(d.close) == 3 and (d.close == "\"\"\"" or d.close == "'''")
+  _ -> false
+}
+
+#[doc("Whether a literal ends with its line when the line does not go on with a `\\`.")]
+pub fn ends_with_line(l: Literal, goes_on: Bool) : Bool = match l {
+  LitDelim(d) -> (not d.spans) and (not goes_on)
+  _ -> false
+}
+
+#[doc("Inside a literal at `i`: the bytes consumed, whether it closed, and the literal after.")]
+pub fn scan(line: String, i: Int, l: Literal) : (Int, Bool, Literal) = match l {
+  LitDelim(d) -> {
+    let (advance, closed, after) = delim.scan(line, i, d)
+    (advance, closed, LitDelim(after))
+  }
+  LitTemplate(frames) -> {
+    let (advance, after) = template.scan(line, i, frames)
+    (advance, list.is_empty(after), LitTemplate(after))
+  }
+}
+
+#[doc("The offset from `i` below `n` where a step inside the literal may do more than advance a byte.")]
+pub fn skip(line: String, i: Int, n: Int, l: Literal) : Int = match l {
+  LitDelim(d) -> delim.skip(line, i, n, d)
+  LitTemplate(frames) -> template.skip(line, i, n, frames)
+}

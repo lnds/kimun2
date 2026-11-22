@@ -1,0 +1,123 @@
+# The files a command reads under a root, in km's order: depth first, each
+# directory's entries by name byte by byte, with ignore files, `.git`,
+# tests and the user's exclusions applied. The root itself is never
+# filtered.
+
+import fs.dir
+import fs.file
+import path
+import km2.ignores
+import km2.ignores.{Stack}
+import km2.selection
+import km2.selection.{Filter}
+
+fn strip_trailing_slash(p: String) : String =
+  if p != "/" and string.ends_with(p, "/") {
+    strip_trailing_slash(string.slice(p, 0, string.byte_length(p) - 1))
+  } else {
+    p
+  }
+
+fn normalize(parts: [String], acc: [String]) : [String] = match parts {
+  [] -> list.reverse(acc)
+  ["", ...rest] -> normalize(rest, acc)
+  [".", ...rest] -> normalize(rest, acc)
+  ["..", ...rest] -> normalize(rest, list.drop(acc, 1))
+  [p, ...rest] -> normalize(rest, [p, ...acc])
+}
+
+#[doc("A path made absolute against the working directory, with `.` and `..` resolved by name.")]
+pub fn absolute(p: String) : String / File {
+  let full = if path.is_absolute(p) { p } else { path.join(ok(dir.current()) ?? "/", p) }
+  "/" ++ string.join(normalize(string.split(full, "/"), []), "/")
+}
+
+fn components(root: String, p: String) : [String] =
+  string.split(selection.relative(root, p), "/") |> list.filter(c => c != "")
+
+type Entry = { parts: [String], path: String }
+
+fn order(a: Entry, b: Entry) : Int =
+  if a.parts < b.parts { -1 } else if b.parts < a.parts { 1 } else { 0 }
+
+# A directory on the way down: where it is, what is in force there, and
+# whether it is left out with everything below it.
+type Level = { parts: [String], stack: Stack, pruned: Bool }
+
+type Walk = { root: String, filter: Filter, exclude_tests: Bool, levels: [Level], kept: [String] }
+
+fn common(a: [String], b: [String], n: Int) : Int = match (a, b) {
+  ([x, ...xs], [y, ...ys]) if x == y -> common(xs, ys, n + 1)
+  _ -> n
+}
+
+fn dir_path(root: String, parts: [String]) : String = if root == "." {
+  "./" ++ string.join(parts, "/")
+} else {
+  root ++ "/" ++ string.join(parts, "/")
+}
+
+fn descend(w: Walk, parent: Level, name: String) : Level / File {
+  let parts = parent.parts ++ [name]
+  let p = dir_path(w.root, parts)
+  let pruned = parent.pruned
+    or selection.excludes_dir(w.filter, w.exclude_tests, name)
+    or ignores.ignored(parent.stack, p, true)
+  Level {
+    parts: parts,
+    stack: if pruned { parent.stack } else { ignores.enter(parent.stack, p) },
+    pruned: pruned
+  }
+}
+
+fn push(w: Walk, levels: [Level], names: [String]) : [Level] / File = match (levels, names) {
+  (_, []) -> levels
+  ([top, ..._], [name, ...rest]) -> push(w, [descend(w, top, name), ...levels], rest)
+  ([], _) -> levels
+}
+
+# The levels for a file's directory: those shared with the previous file
+# kept, the rest entered.
+fn reach(w: Walk, dirs: [String]) : [Level] / File {
+  let depth = list.length(w.levels) - 1
+  let current = match w.levels {
+    [top, ..._] -> top.parts
+    [] -> []
+  }
+  let shared = common(current, dirs, 0)
+  let kept = list.drop(w.levels, depth - shared)
+  push(w, kept, list.drop(dirs, shared))
+}
+
+fn visit(w: Walk, e: Entry) : Walk / File {
+  let dirs = list.init(e.parts) ?? []
+  let levels = reach(w, dirs)
+  let here = list.head(levels)
+  let keep = match here {
+    Some(l) -> (not l.pruned)
+      and (not ignores.ignored(l.stack, e.path, false))
+      and (not selection.excludes_file(w.filter, w.root, w.exclude_tests, e.path))
+    None -> false
+  }
+  Walk { ...w, levels: levels, kept: if keep { [e.path, ...w.kept] } else { w.kept } }
+}
+
+fn is_file(p: String) : Bool / File = match file.metadata(p) {
+  Ok(m) -> m.is_file
+  Err(_) -> false
+}
+
+#[doc("The files under `root` a command reads, in walk order; a root that is a file is read whatever the filters say.")]
+pub fn files(root: String, exclude_tests: Bool, filter: Filter) : [String] / File + Env {
+  let r = strip_trailing_slash(root)
+  if is_file(r) {
+    [r]
+  } else {
+    let entries =
+      dir.walk(r) | (p => Entry { parts: components(r, p), path: p }) |> list.sort_by(order)
+    let top = Level { parts: [], stack: ignores.at_root(r, absolute(r)), pruned: false }
+    let start =
+      Walk { root: r, filter: filter, exclude_tests: exclude_tests, levels: [top], kept: [] }
+    list.reverse((entries |> list.foldl(start, visit)).kept)
+  }
+}

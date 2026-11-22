@@ -1,0 +1,227 @@
+# What `loc` prints, in each format, byte for byte as `km loc` prints it.
+
+import math.real
+import text
+import encoding.json
+import encoding.json_bind.{JsonValue, JNum, JStr, JArr, JObj}
+
+#[doc("Line counts of one language or kind, as `km loc` reports them.")]
+pub type Counts = { files: Int, blank: Int, comment: Int, code: Int }
+
+#[doc("The counts of no file.")]
+pub const EMPTY : Counts = Counts { files: 0, blank: 0, comment: 0, code: 0 }
+
+#[doc("Adds two counts.")]
+pub fn add(a: Counts, b: Counts) : Counts =
+  Counts {
+    files: a.files + b.files,
+    blank: a.blank + b.blank,
+    comment: a.comment + b.comment,
+    code: a.code + b.code
+  }
+
+#[doc("The sum of every counts' columns.")]
+pub fn total(cs: [Counts]) : Counts = cs |> list.foldl(EMPTY, add)
+
+#[doc("What `-v` reports before the table.")]
+pub type Stats = { text_files: Int, unique: Int, duplicates: Int, binaries: Int, seconds: Real }
+
+#[doc("What a run counted: languages sorted as km sorts them, and kinds in km's order.")]
+pub type Report = { languages: [(String, Counts)], kinds: [(String, Counts)] }
+
+#[doc("What every format prints when nothing was counted.")]
+pub const NOTHING : String = "No recognized source files found."
+
+#[doc("The JSON km prints when nothing was counted.")]
+pub const EMPTY_JSON : String =
+  "{\"kinds\":[],\"languages\":[],\"totals\":{\"blank\":0,\"code\":0,\"comment\":0,\"files\":0}}"
+
+#[doc("The JSON km prints for `--by-author` when no author was found.")]
+pub const EMPTY_AUTHORS_JSON : String =
+  "{\"authors\":[],\"totals\":{\"blank\":0,\"code\":0,\"comment\":0,\"files\":0}}"
+
+#[doc("The error km gives for a CI format on `loc`.")]
+pub const CI_FORMAT_ONLY : String =
+  "--format github and --format codeclimate are only supported by cycom, cogcom, smells, impact, docs refs and infra smells"
+
+#[doc("Languages by code lines, most first, ties by name byte by byte.")]
+pub fn sort_languages(langs: [(String, Counts)]) : [(String, Counts)] =
+  langs
+    |> list.sort_by((a, b) => {
+      let (na, ca) = a
+      let (nb, cb) = b
+      if ca.code != cb.code {
+        cb.code - ca.code
+      } else if na < nb {
+        -1
+      } else if nb < na {
+        1
+      } else {
+        0
+      }
+    })
+
+fn rule(width: Int) : String = string.repeat("─", width)
+
+#[doc("`s` padded with spaces to `width` characters, never cut.")]
+pub fn pad_chars(s: String, width: Int) : String {
+  let n = string.char_count(s)
+  if n >= width { s } else { s ++ string.repeat(" ", width - n) }
+}
+
+fn cell(n: Int, width: Int) : String = string.pad_left("#{n}", width, ' ')
+
+#[doc("A table row: the label in its column, then files, blank, comment and code.")]
+pub fn row(label: String, c: Counts) : String =
+  " #{label} #{cell(c.files, 8)} #{cell(c.blank, 12)} #{cell(c.comment, 12)} #{cell(c.code, 12)}"
+
+fn header(label: String) : String =
+  " #{label} #{cell_text("Files", 8)} #{cell_text("Blank", 12)} #{cell_text("Comment", 12)} #{cell_text("Code", 12)}"
+
+fn cell_text(s: String, width: Int) : String = string.pad_left(s, width, ' ')
+
+fn rate(n: Int, seconds: Real) : String =
+  if seconds <= 0.0 { "0.0" } else { real.to_fixed(int_to_real(n) / seconds, 1) }
+
+fn stats_block(s: Stats, lines: Int) : [String] =
+  [
+    "#{cell(s.text_files, 8)} text files.",
+    "#{cell(s.unique, 8)} unique files.",
+    "#{cell(s.duplicates, 8)} files ignored (duplicates).",
+    "#{cell(s.binaries, 8)} files ignored (binary).",
+    "T=#{real.to_fixed(s.seconds, 2)} s (#{rate(s.unique, s.seconds)} files/s, #{rate(lines, s.seconds)} lines/s)",
+    ""
+  ]
+
+fn labelled(rows: [(String, Counts)]) : [String] =
+  rows
+    | (r => {
+      let (name, c) = r
+      row(pad_chars(name, 20), c)
+    })
+
+#[doc("The table `km loc` prints, with `-v`'s block first when given and the kinds after when there are two or more.")]
+pub fn table(r: Report, stats: Option[Stats]) : String {
+  let sum = total(r.languages | .snd)
+  let lines = sum.blank + sum.comment + sum.code
+  let verbose = match stats {
+    Some(s) -> stats_block(s, lines)
+    None -> []
+  }
+  let main = [
+    rule(69),
+    header(pad_chars("Language", 20)),
+    rule(69),
+    ...labelled(r.languages),
+    rule(69),
+    row(pad_chars("SUM:", 20), sum),
+    rule(69)
+  ]
+  let kinds = if list.length(r.kinds) >= 2 {
+    [header(pad_chars("Kind", 20)), rule(69), ...labelled(r.kinds), rule(69)]
+  } else {
+    []
+  }
+  [...verbose, ...main, ...kinds] |> string.join("\n")
+}
+
+fn counts_json(c: Counts) : [(String, JsonValue)] =
+  [
+    ("files", JNum(c.files)),
+    ("blank", JNum(c.blank)),
+    ("comment", JNum(c.comment)),
+    ("code", JNum(c.code))
+  ]
+
+fn named_json(key: String, rows: [(String, Counts)]) : JsonValue =
+  JArr(rows | (p => JObj([(key, JStr(p.fst)), ...counts_json(p.snd)])))
+
+#[doc("The JSON `km loc --format json` prints.")]
+pub fn to_json(r: Report) : String =
+  JObj([
+    ("languages", named_json("name", r.languages)),
+    ("kinds", named_json("kind", r.kinds)),
+    ("totals", JObj(counts_json(total(r.languages | .snd))))
+  ])
+    |> json.json_encode
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(r: Report) : String {
+  let t = total(r.languages | .snd)
+  "loc code:#{t.code} cmt:#{t.comment} blank:#{t.blank} files:#{t.files} langs:#{list.length(r.languages)}"
+}
+
+#[doc("The headline number of `--format terse`: code lines.")]
+pub fn terse(r: Report) : String = "#{total(r.languages | .snd).code}"
+
+#[doc("One author's lines, keyed by identity, as `--by-author` reports them.")]
+pub type Author = { name: String, identity: String, counts: Counts }
+
+#[doc("Authors by code lines, most first, ties by identity byte by byte.")]
+pub fn sort_authors(authors: [Author]) : [Author] =
+  authors
+    |> list.sort_by(
+      (a, b) => if a.counts.code != b.counts.code {
+        b.counts.code - a.counts.code
+      } else if a.identity < b.identity {
+        -1
+      } else if b.identity < a.identity {
+        1
+      } else {
+        0
+      }
+    )
+
+fn pad_width(s: String, width: Int) : String {
+  let n = text.display_width(s)
+  if n >= width { s } else { s ++ string.repeat(" ", width - n) }
+}
+
+#[doc("The `--by-author` table: names padded by display width.")]
+pub fn authors_table(authors: [Author]) : String {
+  let column = authors
+    |> list.foldl(text.display_width("Author"), (w, a) => {
+      let n = text.display_width(a.name)
+      if n > w { n } else { w }
+    })
+  let width = column + 49
+  let sum = total(authors | .counts)
+  let rows = authors | (a => row(pad_width(a.name, column), a.counts))
+  [
+    rule(width),
+    header(pad_width("Author", column)),
+    rule(width),
+    ...rows,
+    rule(width),
+    row(pad_width("SUM:", column), sum),
+    rule(width)
+  ]
+    |> string.join("\n")
+}
+
+#[doc("The JSON of `--by-author`: the `email` field holds the identity.")]
+pub fn authors_json(authors: [Author]) : String =
+  JObj([
+    (
+      "authors",
+      JArr(
+        authors
+          | (a => JObj([
+            ("name", JStr(a.name)),
+            ("email", JStr(a.identity)),
+            ...counts_json(a.counts)
+          ]))
+      )
+    ),
+    ("totals", JObj(counts_json(total(authors | .counts))))
+  ])
+    |> json.json_encode
+
+#[doc("The one-line summary of `--by-author --format short`.")]
+pub fn authors_short(authors: [Author]) : String {
+  let t = total(authors | .counts)
+  "loc_authors code:#{t.code} cmt:#{t.comment} blank:#{t.blank} authors:#{list.length(authors)}"
+}
+
+#[doc("The headline number of `--by-author --format terse`.")]
+pub fn authors_terse(authors: [Author]) : String = "#{total(authors | .counts).code}"

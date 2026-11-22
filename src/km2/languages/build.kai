@@ -1,0 +1,96 @@
+# The vocabulary the registry writes languages in: a language by name and
+# extensions, and one step for each thing it writes beyond plain text.
+
+import km2.languages.spec.{Spec, Language, PLAIN, Backticks, Heredocs, ValueStart}
+
+#[doc("A language known by its extensions, whose spec `syntax` writes over a plain one.")]
+pub fn known(name: String, extensions: [String], syntax: (Spec) -> Spec) : Language =
+  known_by(name, extensions, [], [], syntax)
+
+#[doc("A language known by its extensions, its file names and the programs its shebangs name.")]
+pub fn known_by(
+  name: String,
+  extensions: [String],
+  filenames: [String],
+  shebangs: [String],
+  syntax: (Spec) -> Spec
+) : Language =
+  Language {
+    name: name,
+    extensions: extensions,
+    filenames: filenames,
+    shebangs: shebangs,
+    spec: () => syntax(Spec { ...PLAIN, name: name })
+  }
+
+#[doc("Files of the language hold data or prose, not code.")]
+pub fn data(s: Spec) : Spec = Spec { ...s, is_code: false }
+
+#[doc("The line comment markers.")]
+pub fn line(s: Spec, markers: [String]) : Spec = Spec { ...s, line_comments: markers }
+
+#[doc("Bytes that make a line comment marker no comment when they follow it.")]
+pub fn not_before(s: Spec, bytes: String) : Spec = Spec { ...s, not_before: bytes }
+
+#[doc("The block comment delimiters.")]
+pub fn block(s: Spec, open: String, close: String) : Spec =
+  Spec { ...s, block_comment: Some((open, close)) }
+
+#[doc("A second block comment, which the first does not close.")]
+pub fn other_block(s: Spec, open: String, close: String) : Spec =
+  Spec { ...s, other_block: Some((open, close)) }
+
+#[doc("Block comments nest.")]
+pub fn nested(s: Spec) : Spec = Spec { ...s, nested_comments: true }
+
+#[doc("A pragma: code to its close or to the end of its line.")]
+pub fn pragma(s: Spec, open: String, close: String) : Spec =
+  Spec { ...s, pragma: Some((open, close)) }
+
+#[doc("Documentation attributes, counted as comment.")]
+pub fn docs(s: Spec, attributes: [(String, String)]) : Spec =
+  Spec { ...s, doc_attributes: attributes }
+
+#[doc("Bytes that make a comment of a line from the first column, and the directives that make code of a comment.")]
+pub fn directives(s: Spec, column_one: String, words: [String]) : Spec =
+  Spec { ...s, column_one: column_one, directives: words }
+
+#[doc("A backslash escapes nothing in a quoted string.")]
+pub fn no_escapes(s: Spec) : Spec = Spec { ...s, escapes: false }
+
+#[doc("Single quotes open a string.")]
+pub fn single_quotes(s: Spec) : Spec = Spec { ...s, single_quotes: true }
+
+#[doc("Triple quotes open a string that spans lines, counted as comment when `docstrings`.")]
+pub fn triple(s: Spec, docstrings: Bool) : Spec =
+  Spec { ...s, triple_quotes: true, triple_comments: docstrings }
+
+#[doc("Quoted strings span lines.")]
+pub fn spans(s: Spec) : Spec = Spec { ...s, quotes_span_lines: true }
+
+#[doc("What a backtick opens.")]
+pub fn backticks(s: Spec, b: Backticks) : Spec = Spec { ...s, backticks: b }
+
+#[doc("Rust's raw strings, C++'s raw strings and C#'s verbatim strings, as the language has them.")]
+pub fn raw(s: Spec, rust: Bool, cpp: Bool, verbatim: Bool) : Spec =
+  Spec { ...s, raw_strings: rust, cpp_raw: cpp, verbatim: verbatim }
+
+#[doc("Heredocs in the given flavor.")]
+pub fn heredocs(s: Spec, flavor: Heredocs) : Spec = Spec { ...s, heredocs: Some(flavor) }
+
+#[doc("Regular expression literals, opening where the rule lets a value start.")]
+pub fn regex(s: Spec, rule: ValueStart) : Spec = Spec { ...s, regex: Some(rule) }
+
+#[doc("Literals a mark opens: sigils, percent literals, and the code of a quote character.")]
+pub fn marks(s: Spec, sigils: Bool, percent: Bool, char_codes: Bool) : Spec =
+  Spec { ...s, sigils: sigils, percent: percent, char_codes: char_codes }
+
+#[doc("Where a quote or a `#` is code: after `$` (`$'`, `$#`), escaped by a backslash outside a string, or inside a word.")]
+pub fn quoting(s: Spec, dollar_quotes: Bool, shell: Bool, dollar_hash: Bool) : Spec =
+  Spec {
+    ...s,
+    dollar_quotes: dollar_quotes,
+    shell_quoting: shell,
+    hash_at_word_start: shell,
+    dollar_hash: dollar_hash
+  }

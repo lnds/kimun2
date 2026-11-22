@@ -1,0 +1,41 @@
+import km2.git
+
+const SHA : String = "0123456789abcdef0123456789abcdef01234567"
+
+fn porcelain() : String =
+  string.join(
+    [
+      "#{SHA} 1 1 2",
+      "author Ana",
+      "author-mail <Ana@X.org>",
+      "author-time 10",
+      "committer-time 11",
+      "\tfirst",
+      "#{SHA} 2 2",
+      "author Ana",
+      "author-mail <Ana@X.org>",
+      "author-time 10",
+      "committer-time 11",
+      "\tsecond",
+      "#{SHA} 3 3 1",
+      "author Bo",
+      "author-mail <>",
+      "author-time 12",
+      "committer-time 12",
+      "\tthird"
+    ],
+    "\n"
+  )
+
+test "consecutive lines of one commit are one run" {
+  let hunks = git.parse_porcelain(porcelain())
+  assert list.length(hunks) == 2
+  assert (hunks | (h => (h.author, h.email, h.start_line, h.lines)))
+    == [("Ana", "Ana@X.org", 1, 2), ("Bo", "", 3, 1)]
+}
+
+test "identity is the email without case, else the name" {
+  assert git.identity("Ana", "Ana@X.org") == "ana@x.org"
+  assert git.identity("Bo", " ") == "Bo"
+  assert git.identity("Cy", "unknown") == "Cy"
+}

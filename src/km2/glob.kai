@@ -1,0 +1,158 @@
+# Glob patterns, as km's exclude and kind globs read them: `*` and `?`
+# match any character, `/` included, unless a pattern asks for a literal
+# separator (gitignore patterns do); `**` between separators spans any
+# number of directories; `[...]`, `[!...]` and `{a,b}` as usual; `\`
+# escapes.
+
+#[doc("One element of a compiled glob.")]
+pub type GlobToken
+  = GLit(Char)
+  | GAny
+  | GStar
+  | GRecPrefix
+  | GRecSuffix
+  | GRecMid
+  | GClass(Bool, [(Char, Char)])
+  | GAlt([[GlobToken]])
+
+#[doc("A compiled glob: its tokens and whether `*` and `?` stop at `/`.")]
+pub type Glob = { tokens: [GlobToken], literal_separator: Bool }
+
+type Parsed = { tokens: [GlobToken], rest: [Char] }
+
+fn error(pattern: String, kind: String) : String = "error parsing glob '#{pattern}': #{kind}"
+
+fn class_ranges(pattern: String, cs: [Char], acc: [(Char, Char)], first: Bool) : Result[
+  ([(Char, Char)], [Char]),
+  String
+] =
+  match cs {
+    [] -> Err(error(pattern, "unclosed character class; missing ']'"))
+    [']', ...rest] if not first -> Ok((list.reverse(acc), rest))
+    [lo, '-', hi, ...rest] if hi != ']' ->
+      if char_to_int(lo) > char_to_int(hi) {
+        Err(error(pattern, "invalid range; '#{char_to_string(lo)}' > '#{char_to_string(hi)}'"))
+      } else {
+        class_ranges(pattern, rest, [(lo, hi), ...acc], false)
+      }
+    [c, ...rest] -> class_ranges(pattern, rest, [(c, c), ...acc], false)
+  }
+
+fn class(pattern: String, cs: [Char]) : Result[(GlobToken, [Char]), String] = match cs {
+  ['!', ...rest] -> class_with(pattern, true, rest)
+  ['^', ...rest] -> class_with(pattern, true, rest)
+  _ -> class_with(pattern, false, cs)
+}
+
+fn class_with(pattern: String, negated: Bool, cs: [Char]) : Result[(GlobToken, [Char]), String] {
+  let (ranges, rest) = class_ranges(pattern, cs, [], true)!
+  Ok((GClass(negated, ranges), rest))
+}
+
+# `**` is recursive only next to separators or the pattern's ends;
+# elsewhere it is a `*`.
+fn double_star(acc: [GlobToken], rest: [Char]) : (GlobToken, [GlobToken], [Char]) {
+  let after_sep = match acc {
+    [GLit('/'), ..._] -> true
+    _ -> false
+  }
+  match rest {
+    ['/', ...more] if acc == [] -> (GRecPrefix, acc, more)
+    ['/', ...more] if after_sep -> (GRecMid, list.drop(acc, 1), more)
+    [] if after_sep -> (GRecSuffix, list.drop(acc, 1), rest)
+    _ -> (GStar, acc, rest)
+  }
+}
+
+fn alternatives(pattern: String, cs: [Char], acc: [[GlobToken]]) : Result[
+  (GlobToken, [Char]),
+  String
+] {
+  let p = sequence(pattern, cs, [], true)!
+  match p.rest {
+    [',', ...more] -> alternatives(pattern, more, [p.tokens, ...acc])
+    ['}', ...more] -> Ok((GAlt(list.reverse([p.tokens, ...acc])), more))
+    _ -> Err(error(pattern, "unclosed alternate group; missing '}' (maybe escape '{' with '[{]'?)"))
+  }
+}
+
+fn sequence(pattern: String, cs: [Char], acc: [GlobToken], in_alt: Bool) : Result[Parsed, String] =
+  match cs {
+    [] -> Ok(Parsed { tokens: list.reverse(acc), rest: [] })
+    [',', ..._] if in_alt -> Ok(Parsed { tokens: list.reverse(acc), rest: cs })
+    ['}', ..._] if in_alt -> Ok(Parsed { tokens: list.reverse(acc), rest: cs })
+    ['\\'] -> Err(error(pattern, "dangling '\\'"))
+    ['\\', c, ...rest] -> sequence(pattern, rest, [GLit(c), ...acc], in_alt)
+    ['?', ...rest] -> sequence(pattern, rest, [GAny, ...acc], in_alt)
+    ['*', '*', ...rest] -> {
+      let (token, before, after) = double_star(acc, rest)
+      sequence(pattern, after, [token, ...before], in_alt)
+    }
+    ['*', ...rest] -> sequence(pattern, rest, [GStar, ...acc], in_alt)
+    ['[', ...rest] -> {
+      let (token, after) = class(pattern, rest)!
+      sequence(pattern, after, [token, ...acc], in_alt)
+    }
+    ['{', ...rest] -> {
+      let (token, after) = alternatives(pattern, rest, [])!
+      sequence(pattern, after, [token, ...acc], in_alt)
+    }
+    [c, ...rest] -> sequence(pattern, rest, [GLit(c), ...acc], in_alt)
+  }
+
+#[doc("Compiles a glob; `Err` carries km's message for an invalid one.")]
+pub fn compile(pattern: String, literal_separator: Bool) : Result[Glob, String] {
+  let p = sequence(pattern, string.chars(pattern), [], false)!
+  Ok(Glob { tokens: p.tokens, literal_separator: literal_separator })
+}
+
+fn in_ranges(c: Char, ranges: [(Char, Char)]) : Bool = match ranges {
+  [] -> false
+  [(lo, hi), ...rest] ->
+    (char_to_int(c) >= char_to_int(lo) and char_to_int(c) <= char_to_int(hi)) or in_ranges(c, rest)
+}
+
+fn matches_one(sep: Bool, token: GlobToken, c: Char) : Bool = match token {
+  GLit(x) -> x == c
+  GAny -> not (sep and c == '/')
+  GClass(negated, ranges) -> (not (sep and c == '/')) and in_ranges(c, ranges) != negated
+  _ -> false
+}
+
+# Whether `rest` matches some suffix of `cs` that follows a `/`.
+fn after_slash(sep: Bool, rest: [GlobToken], cs: [Char]) : Bool = match cs {
+  [] -> false
+  ['/', ...more] -> walk(sep, rest, more) or after_slash(sep, rest, more)
+  [_, ...more] -> after_slash(sep, rest, more)
+}
+
+fn star(sep: Bool, rest: [GlobToken], cs: [Char]) : Bool =
+  walk(sep, rest, cs)
+    or (match cs {
+      [] -> false
+      ['/', ..._] if sep -> false
+      [_, ...more] -> star(sep, rest, more)
+    })
+
+fn walk(sep: Bool, tokens: [GlobToken], cs: [Char]) : Bool = match tokens {
+  [] -> cs == []
+  [GStar, ...rest] -> star(sep, rest, cs)
+  [GRecPrefix, ...rest] -> walk(sep, rest, cs) or after_slash(sep, rest, cs)
+  [GRecMid, ...rest] -> match cs {
+    ['/', ...more] -> walk(sep, rest, more) or after_slash(sep, rest, more)
+    _ -> false
+  }
+  [GRecSuffix, ..._] -> match cs {
+    ['/', ..._] -> true
+    _ -> false
+  }
+  [GAlt(alts), ...rest] -> list.any(alts, (alt: [GlobToken]) => walk(sep, alt ++ rest, cs))
+  [token, ...rest] -> match cs {
+    [c, ...more] -> matches_one(sep, token, c) and walk(sep, rest, more)
+    [] -> false
+  }
+}
+
+#[doc("Whether a glob matches the whole of `path`.")]
+pub fn matches(g: Glob, path: String) : Bool =
+  walk(g.literal_separator, g.tokens, string.chars(path))

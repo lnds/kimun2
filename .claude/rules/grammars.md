@@ -22,7 +22,10 @@ paths:
   (`TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION` to
   `TREE_SITTER_LANGUAGE_VERSION` in `lib/include/tree_sitter/api.h`). Use
   the `parser.c` a grammar releases; generate one only for a grammar that
-  publishes none (kaikai's own, from `tree-sitter-kaikai`).
+  publishes none.
+- kaikai's grammar is `kaikailang-org/tree-sitter-kaikai`. A kaikai form
+  it does not parse is fixed there, with a corpus test, and the new pin
+  vendored here; never patched in `vendor/`.
 - Licenses: every vendored piece keeps its `LICENSE` file beside it.
 
 ## Queries
@@ -38,6 +41,12 @@ paths:
   exercises each pattern and the captures expected from it, checked by a
   test.
 - A query is compiled once per language per run, not once per file.
+- **The C library does not evaluate text predicates**: `#eq?` and
+  `#not-eq?` are evaluated by the shim (`c/kts_query.c`), and a
+  predicate it does not know rejects the match. A new predicate is
+  implemented there, with a test, before a query uses it.
+- kaikai cannot embed a file, so `scripts/gen-queries.sh` turns
+  `queries/` into `src/km2/queries.kai`; run it after editing a query.
 - Prefer a node kind and a field over a predicate on text. A `#match?`
   or `#eq?` on identifier text is acceptable only where the language
   marks the concept by name (a `test_` prefix, an `assert` macro).

@@ -1,0 +1,98 @@
+# Reading one line in any state: a step per byte that may matter, the
+# bytes between skipped at once.
+
+import km2.languages.{Spec}
+import km2.lexical.bytes.{byte, at, one_of, skip_until}
+import km2.lexical.heredoc.{Heredoc}
+import km2.lexical.inside
+import km2.lexical.literals
+import km2.lexical.state.{State, Step, StNormal, StString, StBlock, StDoc, StDocString, StHeredoc, code_step, comment_step}
+import km2.lexical.triggers
+
+#[doc("The lexer of a language.")]
+pub fn lexer(spec: Spec) : Lexer =
+  Lexer {
+    spec: spec,
+    table: triggers.table(spec),
+    nexts: triggers.prefixes(spec)
+      | (p => {
+        let (_, after) = p
+        after
+      })
+  }
+
+#[doc("What the classifier reads a language with: its spec and its trigger table.")]
+pub type Lexer = { spec: Spec, table: Vec[Int], nexts: Vec[String] }
+
+fn first_byte(s: String) : Int = byte(s, 0)
+
+fn fast_forward(lx: Lexer, line: String, i: Int, n: Int, state: State, code: Bool) : (Int, Bool) =
+  match state {
+    StNormal -> triggers.skip_plain(lx.table, lx.nexts, line, i, n, code)
+    StString(l) -> (literals.skip(line, i, n, l), code)
+    StDocString(l) -> (literals.skip(line, i, n, l), code)
+    StBlock(open, close, _) -> {
+      let nest = if lx.spec.nested_comments { first_byte(open) } else { -1 }
+      (skip_until(line, i, n, nest, first_byte(close), -1), code)
+    }
+    StDoc(_, Some(l)) -> (literals.skip(line, i, n, l), code)
+    StDoc(close, None) -> (doc_skip(lx, line, i, n, first_byte(close)), code)
+    StHeredoc(_) -> (i, code)
+  }
+
+# Inside a documentation attribute, a byte that neither closes it nor may
+# open a string is skipped.
+fn doc_skip(lx: Lexer, line: String, i: Int, n: Int, close: Int) : Int =
+  if i >= n or byte(line, i) == close or vec_get(lx.table, byte(line, i)) != triggers.PLAIN_BYTE {
+    i
+  } else {
+    doc_skip(lx, line, i + 1, n, close)
+  }
+
+#[doc("What a line holds once read: code, comment, and the first heredoc marked on it.")]
+pub type Seen = { code: Bool, comment: Bool, heredoc: Option[Heredoc] }
+
+fn first_heredoc(held: Option[Heredoc], s: Step) : Option[Heredoc] = match held {
+  None -> s.heredoc
+  _ -> held
+}
+
+#[doc("Reads a line from `i` in `state`, with what was seen before `i`: the state after and what the line holds.")]
+pub fn scan(
+  lx: Lexer,
+  line: String,
+  i: Int,
+  n: Int,
+  state: State,
+  code: Bool,
+  comment: Bool,
+  held: Option[Heredoc]
+) : (State, Seen) {
+  let (j, plain_code) = fast_forward(lx, line, i, n, state, code)
+  if j >= n {
+    (state, Seen { code: plain_code, comment: comment, heredoc: held })
+  } else {
+    let s = inside.step(lx.spec, line, j, state)
+    let seen_code = plain_code or s.code
+    let seen_comment = comment or s.comment
+    let next_held = first_heredoc(held, s)
+    if s.stop {
+      (s.state, Seen { code: seen_code, comment: seen_comment, heredoc: next_held })
+    } else {
+      scan(lx, line, j + s.advance, n, s.state, seen_code, seen_comment, next_held)
+    }
+  }
+}
+
+#[doc("The state the next line starts in: a string that may not span lines ends with its line unless the line goes on with a backslash, and a heredoc marked on the line starts.")]
+pub fn end_line(state: State, goes_on: Bool, h: Option[Heredoc]) : State {
+  let ended = match state {
+    StString(l) if literals.ends_with_line(l, goes_on) -> StNormal
+    StDoc(close, Some(l)) if literals.ends_with_line(l, goes_on) -> StDoc(close, None)
+    _ -> state
+  }
+  match (ended, h) {
+    (StNormal, Some(doc)) -> StHeredoc(doc)
+    _ -> ended
+  }
+}

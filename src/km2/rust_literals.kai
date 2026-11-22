@@ -1,0 +1,160 @@
+# Rust text with comments, character literals and the content of strings
+# turned into spaces, newlines kept, so that what code declares can be read
+# from it by line.
+
+import km2.lexical.bytes.{byte, at, is_word, count_run}
+
+# The text is read by byte offset; each run of code is copied whole.
+
+fn blank(s: String, from: Int, to: Int) : String =
+  string.split(string.slice(s, from, to - from), "\n")
+    | (part => string.repeat(" ", string.byte_length(part)))
+    |> string.join("\n")
+
+fn find_byte(s: String, i: Int, n: Int, b: Int) : Int =
+  if i >= n { n } else if byte(s, i) == b { i } else { find_byte(s, i + 1, n, b) }
+
+fn block_end(s: String, i: Int, n: Int, depth: Int) : Int =
+  if i >= n {
+    n
+  } else if at(s, i, "/*") {
+    block_end(s, i + 2, n, depth + 1)
+  } else if at(s, i, "*/") {
+    if depth <= 1 { i + 2 } else { block_end(s, i + 2, n, depth - 1) }
+  } else {
+    block_end(s, i + 1, n, depth)
+  }
+
+fn string_end(s: String, i: Int, n: Int) : Int =
+  if i >= n {
+    n
+  } else if byte(s, i) == 92 {
+    string_end(s, i + 2, n)
+  } else if byte(s, i) == 34 {
+    i
+  } else {
+    string_end(s, i + 1, n)
+  }
+
+fn raw_end(s: String, i: Int, n: Int, k: Int) : Int =
+  if i >= n {
+    n
+  } else if byte(s, i) == 34 and count_run(s, i + 1, 35, 0) >= k {
+    i
+  } else {
+    raw_end(s, i + 1, n, k)
+  }
+
+# Whether an `r` at `i` starts a token: nothing or a non-word byte before
+# it, or a `b` that itself starts one.
+fn starts_token(s: String, i: Int) : Bool =
+  i == 0
+    or (not is_word(byte(s, i - 1)))
+    or (byte(s, i - 1) == 98 and (i == 1 or (not is_word(byte(s, i - 2)))))
+
+fn raw_hashes(s: String, i: Int) : Int =
+  if byte(s, i) == 114
+    and starts_token(s, i)
+    and byte(s, i + 1 + count_run(s, i + 1, 35, 0)) == 34 {
+    count_run(s, i + 1, 35, 0)
+  } else {
+    -1
+  }
+
+fn comment_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
+  if at(s, i, "//") {
+    let j = find_byte(s, i, n, 10)
+    Some((blank(s, i, j), j))
+  } else if at(s, i, "/*") {
+    let j = block_end(s, i + 2, n, 1)
+    Some((blank(s, i, j), j))
+  } else {
+    None
+  }
+
+# A string keeps its quotes, its content blanked; unterminated, it runs to the end.
+fn string_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
+  if byte(s, i) == 34 {
+    let j = string_end(s, i + 1, n)
+    let closed = j < n
+    Some(
+      (
+        "\"" ++ blank(s, i + 1, j) ++ (if closed { "\"" } else { "" }),
+        if closed { j + 1 } else { n }
+      )
+    )
+  } else {
+    None
+  }
+
+# A raw string keeps its quotes; its `r`, hashes and content are blanked.
+fn raw_piece(s: String, i: Int, n: Int) : Option[(String, Int)] {
+  let k = raw_hashes(s, i)
+  if k < 0 {
+    None
+  } else {
+    let open = i + 2 + k
+    let j = raw_end(s, open, n, k)
+    let closed = j < n
+    let close = if closed { "\"" ++ string.repeat(" ", k) } else { "" }
+    Some(
+      (
+        blank(s, i, open - 1) ++ "\"" ++ blank(s, open, j) ++ close,
+        if closed { j + 1 + k } else { n }
+      )
+    )
+  }
+}
+
+# One piece at `i`, given as its text and where the scan goes on, or none
+# when the byte is plain code.
+fn piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
+  comment_piece(s, i, n)
+    |> option.or_else(() => string_piece(s, i, n))
+    |> option.or_else(() => raw_piece(s, i, n))
+    |> option.or_else(() => quote_piece(s, i, n))
+
+fn quote_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
+  if byte(s, i) != 39 {
+    None
+  } else if byte(s, i + 1) == 92 {
+    let j = find_byte(s, i + 3, n, 39)
+    let end = if j < n { j + 1 } else { n }
+    Some((blank(s, i, end), end))
+  } else {
+    let w = string.string_cp_len(s, i + 1)
+    if w > 0 and byte(s, i + 1 + w) == 39 {
+      Some((blank(s, i, i + 2 + w), i + 2 + w))
+    } else {
+      None
+    }
+  }
+
+# Only `/`, `"`, `'` and `r` can start a piece; other bytes are skipped
+# in one run.
+fn opener(s: String, i: Int, n: Int) : Int =
+  if i >= n {
+    n
+  } else {
+    let b = byte(s, i)
+    if b == 47 or b == 34 or b == 39 or b == 114 { i } else { opener(s, i + 1, n) }
+  }
+
+fn code_of(s: String, from: Int, n: Int, start: Int, acc: [String]) : String {
+  let i = opener(s, from, n)
+  if i >= n {
+    string.string_concat_all(list.reverse([string.slice(s, start, n - start), ...acc]))
+  } else {
+    match piece(s, i, n) {
+      Some((text, next)) ->
+        code_of(s, next, n, next, [text, string.slice(s, start, i - start), ...acc])
+      None -> code_of(s, i + 1, n, start, acc)
+    }
+  }
+}
+
+#[doc("A Rust source's lines with comments and literals blanked, line lengths kept.")]
+pub fn code_lines(src: String) : [String] {
+  let text = string.join(string.lines(src), "\n")
+  string.split(code_of(text, 0, string.byte_length(text), 0, []), "\n")
+}

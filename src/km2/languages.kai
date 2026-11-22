@@ -1,0 +1,113 @@
+# The language of a file: by its name, by its text, by its shebang, as km
+# detects it. What each language writes lives in `km2.languages.registry`.
+
+import encoding.utf8
+import km2.languages.spec
+import km2.languages.spec.{Language}
+import km2.languages.registry.{LANGUAGES}
+
+#[doc("How a language writes comments and literals.")]
+pub type Spec = spec.Spec
+
+fn base_name(path: String) : String = match string.split(path, "/") |> list.reverse {
+  [name, ..._] -> name
+  [] -> path
+}
+
+# The part after the last `.`, none for a name without one or whose only
+# `.` starts it (`.bashrc`).
+fn extension(name: String) : Option[String] = match string.last_index_of(name, ".") {
+  Some(dot) if dot > 0 -> Some(string.slice(name, dot + 1, string.byte_length(name) - dot - 1))
+  _ -> None
+}
+
+#[doc("The language of a file by its name alone: a known file name, else its extension.")]
+pub fn by_name(path: String) : Option[Spec] {
+  let name = base_name(path)
+  let known = LANGUAGES
+  let by_extension = () => (extension(name)
+    |> option.and_then(ext => list.find(known, l => list.contains(l.extensions, ext))))
+  let found =
+    list.find(known, l => list.contains(l.filenames, name)) |> option.or_else(by_extension)
+  found |> option.map(built)
+}
+
+fn built(l: Language) : Spec = l.spec()
+
+const CPP_ONLY : [String] = [
+  "namespace ",
+  "template<",
+  "template <",
+  "class ",
+  "public:",
+  "private:",
+  "protected:",
+  "using ",
+  "constexpr ",
+  "static_assert("
+]
+
+fn is_cpp_line(line: String) : Bool {
+  let l = string.trim_left(line)
+  list.any(CPP_ONLY, m => string.starts_with(l, m)) or string.contains(l, "std::")
+}
+
+fn named(name: String) : Option[Spec] =
+  list.find(LANGUAGES, l => l.name == name) |> option.map(built)
+
+#[doc("The language of a file once its text is known: a C header, valid UTF-8, whose text only C++ writes is C++.")]
+pub fn refine(path: String, s: Spec, src: String) : Spec =
+  if s.name == "C"
+    and extension(base_name(path)) == Some("h")
+    and utf8.is_valid(string.bytes(src))
+    and list.any(
+      string.lines(src),
+      is_cpp_line
+    ) {
+    named("C++") ?? s
+  } else {
+    s
+  }
+
+fn words(s: String) : [String] =
+  string.split(string.replace(s, "\t", " "), " ") |? (w => not string.is_empty(w))
+
+# The program a shebang runs: past `env` and its flags when it runs `env`.
+fn program(line: String) : String {
+  let interpreter = match string.split(line, "/") |> list.reverse {
+    [last, ..._] -> list.head(words(last)) ?? ""
+    [] -> ""
+  }
+  if interpreter == "env" {
+    let after = list.drop_while(words(line), w => not string.ends_with(w, "env")) |> list.drop(1)
+    list.find(after, w => not string.starts_with(w, "-")) ?? ""
+  } else {
+    interpreter
+  }
+}
+
+#[doc("The language a first line names with a shebang, by the prefix of its program.")]
+pub fn by_shebang(first_line: String) : Option[Spec] {
+  let line = string.trim(first_line)
+  if string.starts_with(line, "#!") {
+    let prog = program(line)
+    list.find(LANGUAGES, l => list.any(l.shebangs, sh => string.starts_with(prog, sh)))
+      |> option.map(built)
+  } else {
+    None
+  }
+}
+
+fn first_line(src: String) : String = match string.split_once(src, "\n") {
+  Some((line, _)) -> line
+  None -> src
+}
+
+#[doc("The language of a file from its path and text: its name, refined by its text, else its shebang.")]
+pub fn detect(path: String, src: String) : Option[Spec] = match by_name(path) {
+  Some(s) -> Some(refine(path, s, src))
+  None -> by_shebang(first_line(src))
+}
+
+#[doc("The language of a file by its name alone.")]
+pub fn of_path(path: String) : Option[Spec] = by_name(path)

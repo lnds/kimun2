@@ -1,0 +1,111 @@
+# Ignore files (`.gitignore`, `.ignore`, `.git/info/exclude`, the global
+# excludes file), read and matched as the walk km is built on reads them.
+
+import km2.glob
+import km2.glob.{Glob}
+
+#[doc("One pattern line: its glob, whether `!` re-includes, whether it matches directories only.")]
+pub type Rule = { pattern: Glob, whitelist: Bool, only_dir: Bool }
+
+#[doc("The rules of one ignore file, matched relative to the directory `root`.")]
+pub type Matcher = { root: String, rules: [Rule] }
+
+#[doc("What an ignore file says about a path.")]
+pub type Verdict = Ignored | Whitelisted | Unmatched
+
+#[doc("A matcher with no rules.")]
+pub fn empty(root: String) : Matcher = Matcher { root: root, rules: [] }
+
+fn has_doublestar_prefix(p: String) : Bool = string.starts_with(p, "**/") or p == "**"
+
+fn drop_first(s: String) : String = string.slice(s, 1, string.byte_length(s) - 1)
+
+fn drop_last(s: String) : String = string.slice(s, 0, string.byte_length(s) - 1)
+
+# The line with its markers taken off: the glob text, whether it is
+# anchored, whether it re-includes.
+fn markers(line: String) : (String, Bool, Bool) =
+  if string.starts_with(line, "\\!") or string.starts_with(line, "\\#") {
+    let rest = drop_first(line)
+    (rest, string.starts_with(rest, "/"), false)
+  } else {
+    let whitelist = string.starts_with(line, "!")
+    let rest = if whitelist { drop_first(line) } else { line }
+    if string.starts_with(rest, "/") {
+      (drop_first(rest), true, whitelist)
+    } else {
+      (rest, false, whitelist)
+    }
+  }
+
+# A trailing slash makes the rule match directories only; an escaped one
+# keeps no backslash.
+fn directory_only(text: String) : (String, Bool) =
+  if not string.ends_with(text, "/") {
+    (text, false)
+  } else {
+    let body = drop_last(text)
+    (if string.ends_with(body, "\\") { drop_last(body) } else { body }, true)
+  }
+
+# A pattern with no slash matches at any depth; a trailing `/**` matches
+# inside its directory only.
+fn glob_text(body: String, anchored: Bool) : String {
+  let floating =
+    (not anchored) and (not string.contains(body, "/")) and (not has_doublestar_prefix(body))
+  let anywhere = if floating { "**/" ++ body } else { body }
+  if string.ends_with(anywhere, "/**") { anywhere ++ "/*" } else { anywhere }
+}
+
+fn rule_of(raw: String) : Option[Rule] {
+  let line = if string.ends_with(raw, "\\ ") { raw } else { string.trim_right(raw) }
+  if line == "" or string.starts_with(line, "#") {
+    None
+  } else {
+    let (text, anchored, whitelist) = markers(line)
+    let (body, only_dir) = directory_only(text)
+    ok(glob.compile(glob_text(body, anchored), true))
+      |> option.map(g => Rule { pattern: g, whitelist: whitelist, only_dir: only_dir })
+  }
+}
+
+fn rules_of(line: String) : [Rule] = match rule_of(line) {
+  Some(r) -> [r]
+  None -> []
+}
+
+#[doc("Reads an ignore file's text; lines that do not compile are skipped, as the walk km uses skips them.")]
+pub fn parse(root: String, text: String) : Matcher =
+  Matcher {
+    root: root,
+    rules: string.lines(text) || (l => rules_of(string.drop_suffix(l, "\r") ?? l))
+  }
+
+fn strip_dot_slash(p: String) : String = string.drop_prefix(p, "./") ?? p
+
+# The path relative to the matcher's directory.
+fn relative(m: Matcher, path: String) : String {
+  let p = strip_dot_slash(path)
+  let root = strip_dot_slash(m.root)
+  if m.root == "." or root == "" or (not string.contains(p, "/")) {
+    p
+  } else {
+    match string.drop_prefix(p, root) {
+      Some(rest) -> string.drop_prefix(rest, "/") ?? rest
+      None -> p
+    }
+  }
+}
+
+fn last_match(rules: [Rule], path: String, is_dir: Bool, found: Verdict) : Verdict = match rules {
+  [] -> found
+  [r, ...rest] -> {
+    let applies = ((not r.only_dir) or is_dir) and glob.matches(r.pattern, path)
+    let now = if not applies { found } else if r.whitelist { Whitelisted } else { Ignored }
+    last_match(rest, path, is_dir, now)
+  }
+}
+
+#[doc("The verdict of the last rule that matches `path`; directory-only rules match only directories.")]
+pub fn matched(m: Matcher, path: String, is_dir: Bool) : Verdict =
+  last_match(m.rules, relative(m, path), is_dir, Unmatched)

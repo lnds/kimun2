@@ -1,0 +1,83 @@
+# Where a value may start, and the regular expression literals that open
+# there (JavaScript, Ruby). `before` is the text between `start` and `i`.
+
+import km2.languages.spec.{ValueStart}
+import km2.lexical.bytes.{byte, at, is_space, is_word, one_of, holds_interpolation}
+
+fn trim_end(line: String, start: Int, j: Int) : Int =
+  if j > start and is_space(byte(line, j - 1)) { trim_end(line, start, j - 1) } else { j }
+
+# Whether the text up to `j` ends with `word`, and not with a longer name.
+fn ends_with_word(line: String, start: Int, j: Int, word: String) : Bool {
+  let from = j - string.byte_length(word)
+  let before = if from > start { byte(line, from - 1) } else { -1 }
+  from >= start and at(line, from, word) and (not (is_word(before) or before >= 128))
+}
+
+#[doc("Whether a value may start at `i`: at the start, after an operator, an opening bracket or a word of the rule, never right after a `<`.")]
+pub fn after_operator(rule: ValueStart, line: String, start: Int, i: Int) : Bool {
+  let j = trim_end(line, start, i)
+  let last = byte(line, j - 1)
+  if j == start {
+    true
+  } else if last == 60 and j == i {
+    false
+  } else if one_of(rule.operators, last) {
+    true
+  } else {
+    list.any(rule.words, w => ends_with_word(line, start, j, w))
+  }
+}
+
+#[doc("Whether a value may start at `i` as the argument of a call without parentheses: after a space, with neither a space nor `=` at `i + 1`.")]
+pub fn as_argument(rule: ValueStart, line: String, start: Int, i: Int) : Bool {
+  let next = byte(line, i + 1)
+  rule.arguments
+    and i > start
+    and is_space(byte(line, i - 1))
+    and next >= 0
+    and (not is_space(
+      next
+    ))
+    and next != 61
+}
+
+fn regex_end(line: String, i: Int, n: Int, class: Bool) : Int =
+  if i >= n {
+    -1
+  } else {
+    match byte(line, i) {
+      92 -> regex_end(line, i + 2, n, class)
+      91 -> regex_end(line, i + 1, n, true)
+      93 -> regex_end(line, i + 1, n, false)
+      47 if not class -> i
+      _ -> regex_end(line, i + 1, n, class)
+    }
+  }
+
+fn opens(rule: ValueStart, line: String, i: Int) : Bool {
+  let next = byte(line, i + 1)
+  byte(line, i) == 47
+    and next != 47
+    and next != 42
+    and (after_operator(rule, line, 0, i)
+      or as_argument(
+        rule,
+        line,
+        0,
+        i
+      ))
+}
+
+#[doc("The width of the regular expression that opens at `i`, closing slash included, if one opens and closes on the line without interpolating.")]
+pub fn width(rule: ValueStart, line: String, i: Int) : Option[Int] =
+  if opens(rule, line, i) {
+    let end = regex_end(line, i + 1, string.byte_length(line), false)
+    if end < 0 or (rule.interpolates and holds_interpolation(line, i + 1, end)) {
+      None
+    } else {
+      Some(end + 1 - i)
+    }
+  } else {
+    None
+  }

@@ -1,0 +1,146 @@
+# What `loc --by-author` asks git: where the repository is, and who wrote
+# each line of a file, through the `git` program.
+
+import fs.file
+import os.process
+import path
+import effects.os.{Exited, Child}
+
+#[doc("A run of consecutive lines from one author and commit time.")]
+pub type Hunk = {
+  author: String,
+  email: String,
+  time: Int,
+  committed: Int,
+  start_line: Int,
+  lines: Int
+}
+
+fn drain_err(c: Child) : Unit / Process = match process.read_stderr(c) {
+  Ok("") -> ()
+  Ok(_) -> drain_err(c)
+  Err(_) -> ()
+}
+
+#[doc("Runs git and gives its output when it exits with 0; its diagnostics are read and dropped.")]
+pub fn run(args: [String]) : Option[String] / Process = match process.pipe_errs("git", args) {
+  Err(_) -> None
+  Ok(c) -> {
+    let out = process.read_all(c)
+    drain_err(c)
+    match (process.wait(c), out) {
+      (Ok(Exited(0)), Ok(text)) -> Some(text)
+      _ -> None
+    }
+  }
+}
+
+fn line_of(out: Option[String]) : Option[String] = out |> option.map(string.trim_right)
+
+#[doc("Where a directory sits in its repository: the working tree, and the directory's path within it.")]
+pub type Repo = { work_tree: String, prefix: String }
+
+#[doc("The repository holding `root`, or km's message for why there is none.")]
+pub fn discover(root: String) : Result[Repo, String] / File + Process =
+  if not file.exists(root) {
+    Err(
+      "failed to resolve path '#{root}': No such file or directory; class=Os (2); code=NotFound (-3)"
+    )
+  } else if line_of(run(["-C", root, "rev-parse", "--is-bare-repository"])) == Some("true") {
+    Err("bare repositories are not supported")
+  } else {
+    match (
+      line_of(run(["-C", root, "rev-parse", "--show-toplevel"])),
+      line_of(run(["-C", root, "rev-parse", "--show-prefix"]))
+    ) {
+      (Some(top), Some(prefix)) ->
+        Ok(Repo { work_tree: top, prefix: string.drop_suffix(prefix, "/") ?? prefix })
+      _ -> Err("could not find repository at '#{root}'; class=Repository (6); code=NotFound (-3)")
+    }
+  }
+
+#[doc("Whether the repository is a shallow clone.")]
+pub fn is_shallow(repo: Repo) : Bool / Process =
+  line_of(run(["-C", repo.work_tree, "rev-parse", "--is-shallow-repository"])) == Some("true")
+
+fn is_hex(c: Char) : Bool = char.is_digit(c) or list.contains(string.chars("abcdefABCDEF"), c)
+
+fn is_header(word: String) : Bool =
+  string.byte_length(word) >= 40 and list.all(string.chars(word), is_hex)
+
+fn strip_angles(v: String) : String {
+  let left = string.chars(v) |> list.drop_while(c => c == '<')
+  string.from_chars(list.reverse(list.drop_while(list.reverse(left), c => c == '>')))
+}
+
+type Porcelain = { current: Hunk, runs: [Hunk] }
+
+fn joined(runs: [Hunk], h: Hunk) : [Hunk] = match runs {
+  [last, ...rest] if last.author == h.author
+    and last.email == h.email
+    and last.time == h.time
+    and last.committed == h.committed
+    and last.start_line + last.lines == h.start_line ->
+    [Hunk { ...last, lines: last.lines + 1 }, ...rest]
+  _ -> [Hunk { ...h, lines: 1 }, ...runs]
+}
+
+fn header_line(h: Hunk, words: [String]) : Hunk = match words {
+  [_, _, final, ..._] -> Hunk { ...h, start_line: string.to_int(final) ?? h.start_line }
+  _ -> h
+}
+
+fn porcelain_row(p: Porcelain, row: String) : Porcelain =
+  if string.starts_with(row, "\t") {
+    Porcelain { ...p, runs: joined(p.runs, p.current) }
+  } else {
+    let (key, value) = match string.split_once(row, " ") {
+      Some(kv) -> (kv.fst, kv.snd)
+      None -> (row, "")
+    }
+    let h = p.current
+    let next = match key {
+      "author" -> Hunk { ...h, author: value }
+      "author-mail" -> Hunk { ...h, email: strip_angles(value) }
+      "author-time" -> Hunk { ...h, time: string.to_int(string.trim(value)) ?? 0 }
+      "committer-time" -> Hunk { ...h, committed: string.to_int(string.trim(value)) ?? 0 }
+      _ -> if is_header(key) { header_line(h, string.split(row, " ")) } else { h }
+    }
+    Porcelain { ...p, current: next }
+  }
+
+#[doc("The runs of lines `git blame --line-porcelain` gives, joined as km joins them.")]
+pub fn parse_porcelain(text: String) : [Hunk] {
+  let start = Porcelain {
+    current: Hunk { author: "", email: "", time: 0, committed: 0, start_line: 0, lines: 1 },
+    runs: []
+  }
+  list.reverse((string.lines(text) |> list.foldl(start, porcelain_row)).runs)
+}
+
+#[doc("Who wrote each line of a file at HEAD, with `.git-blame-ignore-revs` when the repository has it; whether that file could not be read comes second.")]
+pub fn blame(repo: Repo, rel: String) : (Option[[Hunk]], Bool) / File + Process {
+  let base = ["-C", repo.work_tree, "blame", "--line-porcelain", "-w", "-M", "-C"]
+  let tail = ["HEAD", "--", rel]
+  let revs = path.join(repo.work_tree, ".git-blame-ignore-revs")
+  if file.exists(revs) {
+    match run([...base, "--ignore-revs-file", ".git-blame-ignore-revs", ...tail]) {
+      Some(text) -> (Some(parse_porcelain(text)), false)
+      None -> match run(base ++ tail) {
+        Some(text) -> (Some(parse_porcelain(text)), true)
+        None -> (None, false)
+      }
+    }
+  } else {
+    match run(base ++ tail) {
+      Some(text) -> (Some(parse_porcelain(text)), false)
+      None -> (None, false)
+    }
+  }
+}
+
+#[doc("How km tells people apart: the email without case, or the name when there is no email.")]
+pub fn identity(name: String, email: String) : String {
+  let e = string.trim(email)
+  if e == "" or e == "unknown" { name } else { string.to_lower_unicode(e) }
+}

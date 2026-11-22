@@ -1,0 +1,153 @@
+# `.kimun.toml`: found from the working directory as km finds it, and read
+# whole or not at all: any value of the wrong type anywhere discards the
+# file, as km's typed reading does.
+
+import fs.dir
+import fs.file
+import path
+import encoding.toml
+import encoding.toml.{TomlValue, TStr, TBool, TInt, TReal, TArr, TTbl}
+
+#[doc("The globs `[kinds]` declares for each kind.")]
+pub type KindGlobs = { code: [String], docs: [String], infra: [String], data: [String] }
+
+#[doc("What `.kimun.toml` says that `loc` reads.")]
+pub type Config = {
+  exclude_dirs: [String],
+  exclude_extensions: [String],
+  exclude_patterns: [String],
+  kinds: KindGlobs
+}
+
+#[doc("The configuration of a project without `.kimun.toml`.")]
+pub const DEFAULT : Config = Config {
+  exclude_dirs: [],
+  exclude_extensions: [],
+  exclude_patterns: [],
+  kinds: KindGlobs { code: [], docs: [], infra: [], data: [] }
+}
+
+type Table = [Pair[String, TomlValue]]
+
+# The type each key of each section must have; a key not listed is ignored.
+type Shape = SCount | SReal | SText | STexts | SFlag | SOneOrMany | STextMap
+
+const SHAPES : [(String, [(String, Shape)])] = [
+  ("smells", [("max_lines", SCount), ("max_params", SCount)]),
+  ("dups", [("min_lines", SCount), ("max_duplicates", SCount), ("max_dup_ratio", SReal)]),
+  ("score", [("model", SText), ("fail_below", SText)]),
+  ("age", [("active_days", SCount), ("frozen_days", SCount)]),
+  ("tc", [("min_degree", SCount), ("min_strength", SReal)]),
+  ("hotspots", [("complexity", SText)]),
+  ("impact", [("inert", STexts), ("entry_points", STexts)]),
+  ("map", [("llm_friendly", SReal), ("llm_risk", SReal)]),
+  ("exclude", [("dirs", STexts), ("extensions", STexts), ("patterns", STexts)]),
+  (
+    "kinds",
+    [("separate", SFlag), ("code", STexts), ("docs", STexts), ("infra", STexts), ("data", STexts)]
+  ),
+  ("docs", [("covers", STextMap), ("ignore", STexts)])
+]
+
+fn is_text(v: TomlValue) : Bool = match v {
+  TStr(_) -> true
+  _ -> false
+}
+
+fn fits(shape: Shape, v: TomlValue) : Bool = match (shape, v) {
+  (SCount, TInt(n)) -> n >= 0
+  (SReal, TInt(_)) -> true
+  (SReal, TReal(_)) -> true
+  (SText, TStr(_)) -> true
+  (SFlag, TBool(_)) -> true
+  (STexts, TArr(vs)) -> list.all(vs, is_text)
+  (SOneOrMany, TStr(_)) -> true
+  (SOneOrMany, TArr(vs)) -> list.all(vs, is_text)
+  (STextMap, TTbl(ps)) -> list.all(ps, p => fits(SOneOrMany, p.snd))
+  _ -> false
+}
+
+fn section_fits(keys: [(String, Shape)], v: TomlValue) : Bool = match v {
+  TTbl(ps) -> list.all(keys, k => {
+    let (key, shape) = k
+    match toml.pairs_get(ps, key) {
+      None -> true
+      Some(x) -> fits(shape, x)
+    }
+  })
+  _ -> false
+}
+
+fn well_typed(root: Table) : Bool =
+  list.all(SHAPES, s => {
+    let (name, keys) = s
+    match toml.pairs_get(root, name) {
+      None -> true
+      Some(v) -> section_fits(keys, v)
+    }
+  })
+
+fn texts(root: Table, section: String, key: String) : [String] =
+  match toml.pairs_get(root, section) {
+    Some(TTbl(ps)) -> match toml.pairs_get(ps, key) {
+      Some(TArr(vs)) -> vs
+        || (v => match v {
+          TStr(s) -> [s]
+          _ -> []
+        })
+      _ -> []
+    }
+    _ -> []
+  }
+
+fn of_table(root: Table) : Config =
+  Config {
+    exclude_dirs: texts(root, "exclude", "dirs"),
+    exclude_extensions: texts(root, "exclude", "extensions"),
+    exclude_patterns: texts(root, "exclude", "patterns"),
+    kinds: KindGlobs {
+      code: texts(root, "kinds", "code"),
+      docs: texts(root, "kinds", "docs"),
+      infra: texts(root, "kinds", "infra"),
+      data: texts(root, "kinds", "data")
+    }
+  }
+
+#[doc("Reads a configuration's text: `None` when it is not TOML or a value has the wrong type.")]
+pub fn parse(src: String) : Option[Config] = match toml.decode(src) {
+  Some(TTbl(root)) -> if well_typed(root) { Some(of_table(root)) } else { None }
+  _ -> None
+}
+
+fn parent(d: String) : String {
+  let p = path.dirname(d)
+  if p == "" { "/" } else { p }
+}
+
+# The working tree that holds `d`: the nearest directory, `d` or above,
+# with a `.git`.
+fn work_tree(d: String) : Option[String] / File =
+  if file.exists(path.join(d, ".git")) {
+    Some(d)
+  } else if d == "/" {
+    None
+  } else {
+    work_tree(parent(d))
+  }
+
+fn read_config(p: String) : Option[Config] / File = match file.read(p) {
+  Ok(src) -> parse(src)
+  Err(_) -> None
+}
+
+#[doc("The configuration in force: `.kimun.toml` at the root of the repository holding the working directory, else in the working directory, else the default.")]
+pub fn load() : Config / File {
+  let here = ok(dir.current()) ?? "."
+  let in_repo = work_tree(here)
+    |> option.and_then(root => {
+      let p = path.join(root, ".kimun.toml")
+      if file.exists(p) { Some(p) } else { None }
+    })
+  let chosen = in_repo ?? (if file.exists(".kimun.toml") { ".kimun.toml" } else { "" })
+  if chosen == "" { DEFAULT } else { read_config(chosen) ?? DEFAULT }
+}

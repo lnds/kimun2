@@ -1,0 +1,133 @@
+# Which files a walk keeps: tests, examples and benchmarks by their
+# conventions, and the user's exclusions by extension, directory and glob,
+# as km applies them.
+
+import km2.glob
+import km2.glob.{Glob}
+
+const TEST_DIRS : [String] = ["tests", "test", "__tests__", "spec"]
+
+const EXAMPLE_DIRS : [String] =
+  ["examples", "example", "benches", "bench", "benchmarks", "benchsuite"]
+
+#[doc("Whether a directory name holds tests: a conventional name, or a .NET test project (`App.Tests`).")]
+pub fn is_test_dir(name: String) : Bool =
+  list.contains(TEST_DIRS, name)
+    or (match string.last_index_of(name, ".") {
+      Some(i) -> {
+        let last = string.slice(name, i + 1, string.byte_length(name) - i - 1)
+        string.ends_with(last, "Tests") or string.ends_with(last, "Test")
+      }
+      None -> false
+    })
+
+#[doc("Whether a directory name holds examples or benchmarks.")]
+pub fn is_example_dir(name: String) : Bool = list.contains(EXAMPLE_DIRS, name)
+
+#[doc("Whether a directory is left out with tests excluded.")]
+pub fn is_non_production_dir(name: String) : Bool = is_test_dir(name) or is_example_dir(name)
+
+# Per extension, the stem suffixes and prefixes that make a test file.
+const TEST_NAMES : [([String], [String], [String])] = [
+  (["rs", "go", "exs", "dart"], ["_test"], []),
+  (["py"], ["_test"], ["test_"]),
+  (["rb"], ["_test", "_spec"], []),
+  (["php"], ["Test", "_test"], []),
+  (["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"], [".test", ".spec"], []),
+  (["java", "kt", "kts", "cs", "swift"], ["Test", "Tests"], []),
+  (["scala"], ["Test", "Spec"], []),
+  (["c"], ["_test", "_unittest"], ["test_"]),
+  (["cc", "cpp", "cxx"], ["_test", "_unittest", "Test"], ["test_"]),
+  (["hs"], ["Test", "Spec"], [])
+]
+
+#[doc("The last component of a path.")]
+pub fn file_name(p: String) : String = match string.last_index_of(p, "/") {
+  Some(i) -> string.slice(p, i + 1, string.byte_length(p) - i - 1)
+  None -> p
+}
+
+#[doc("Whether a file is a test by its name, as km's conventions say for its extension.")]
+pub fn is_test_file(p: String) : Bool {
+  let name = file_name(p)
+  match string.last_index_of(name, ".") {
+    None -> false
+    Some(i) -> {
+      let ext = string.slice(name, i + 1, string.byte_length(name) - i - 1)
+      let stem = string.slice(name, 0, i)
+      list.any(TEST_NAMES, t => {
+        let (exts, suffixes, prefixes) = t
+        list.contains(exts, ext)
+          and (list.any(suffixes, s => string.ends_with(stem, s))
+            or list.any(prefixes, s => string.starts_with(stem, s)))
+      })
+    }
+  }
+}
+
+#[doc("A file's extension as a path gives it: after the last dot of its name, none for a name with no dot or only a leading one.")]
+pub fn extension(p: String) : Option[String] {
+  let name = file_name(p)
+  match string.last_index_of(name, ".") {
+    Some(i) if i > 0 -> Some(string.slice(name, i + 1, string.byte_length(name) - i - 1))
+    _ -> None
+  }
+}
+
+fn strip_dots(s: String) : String = match string.drop_prefix(s, ".") {
+  Some(rest) -> strip_dots(rest)
+  None -> s
+}
+
+#[doc("Extension values as km takes them: leading dots dropped, lowercased, empty ones dropped.")]
+pub fn normalized(values: [String]) : [String] =
+  values | (v => string.to_lower_unicode(strip_dots(v))) |> list.filter(v => v != "")
+
+#[doc("What the user excludes: extensions, directory names and globs, and the extensions kept when `--include-ext` is given.")]
+pub type Filter = {
+  include_ext: [String],
+  exclude_ext: [String],
+  exclude_dirs: [String],
+  globs: [Glob]
+}
+
+#[doc("A filter that excludes nothing.")]
+pub const EMPTY : Filter = Filter { include_ext: [], exclude_ext: [], exclude_dirs: [], globs: [] }
+
+fn listed(values: [String], ext: String) : Bool = list.contains(values, string.to_lower(ext))
+
+#[doc("Whether the extension rules exclude a file; an include list overrides every exclude rule.")]
+pub fn excludes_by_extension(f: Filter, p: String) : Bool =
+  if f.include_ext != [] {
+    match extension(p) {
+      None -> true
+      Some(ext) -> not listed(f.include_ext, ext)
+    }
+  } else {
+    match extension(p) {
+      None -> false
+      Some(ext) -> listed(f.exclude_ext, ext)
+    }
+  }
+
+#[doc("A path relative to the walk's root, as globs are matched against it.")]
+pub fn relative(root: String, p: String) : String {
+  let base = if root == "." { "./" } else { root ++ "/" }
+  string.drop_prefix(p, base) ?? p
+}
+
+#[doc("Whether an exclude glob matches a file, by its path relative to the root.")]
+pub fn excludes_by_glob(f: Filter, root: String, p: String) : Bool {
+  let rel = relative(root, p)
+  list.any(f.globs, g => glob.matches(g, rel))
+}
+
+#[doc("Whether a file below the root is left out by tests, extension or glob.")]
+pub fn excludes_file(f: Filter, root: String, exclude_tests: Bool, p: String) : Bool =
+  (exclude_tests and is_test_file(p)) or excludes_by_extension(f, p) or excludes_by_glob(f, root, p)
+
+#[doc("Whether a directory below the root is not descended: `.git`, an excluded name, or tests and examples when excluded.")]
+pub fn excludes_dir(f: Filter, exclude_tests: Bool, name: String) : Bool =
+  name == ".git"
+    or list.contains(f.exclude_dirs, name)
+    or (exclude_tests and is_non_production_dir(name))

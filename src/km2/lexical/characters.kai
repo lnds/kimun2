@@ -1,0 +1,22 @@
+# Character literals where a single quote opens no string: `'a'`, `'\''`,
+# and the quote of a lifetime or a label, which opens nothing.
+
+import km2.lexical.bytes.{byte, word_len}
+
+# Search for a closing `'` from `from` below `reach`.
+fn quote_close(line: String, from: Int, reach: Int) : Int =
+  if from >= reach {
+    -1
+  } else if byte(line, from) == 39 {
+    from
+  } else {
+    quote_close(line, from + 1, reach)
+  }
+
+#[doc("Length of a character literal after a `'` at `i`, closing quote included, or 0 for a lifetime, a label or a quote that closes nothing nearby.")]
+pub fn character_len(line: String, i: Int) : Int {
+  let name = word_len(line, i, 0)
+  let (skip_len, reach) = if byte(line, i) == 92 { (2, 12) } else { (1, 5) }
+  let close = quote_close(line, i + skip_len, i + reach)
+  if (name > 0 and byte(line, i + name) != 39) or close < 0 { 0 } else { close - i + 1 }
+}

@@ -1,0 +1,116 @@
+# What a language writes, as data: the fields the line classifier reads,
+# and how a file is recognized as written in it.
+
+#[doc("What a backtick opens.")]
+pub type Backticks
+  = TicksCode
+  | TicksRaw
+  | TicksTemplate
+
+#[doc("How a language writes heredocs.")]
+pub type Heredocs
+  = HereShell
+  | HereRuby
+  | HerePhp
+  | HerePerl
+
+#[doc("Where a value, rather than the operand of a division, may start: what a regular expression or a percent literal may follow.")]
+pub type ValueStart = {
+  # Bytes of the operators and opening brackets a value may follow.
+  operators: String,
+  words: [String],
+  # A value may start after a space when none follows (`split /,/`).
+  arguments: Bool,
+  # `#{` holds code inside the literal.
+  interpolates: Bool
+}
+
+#[doc("How a language writes comments and literals, which is what classifying its lines needs.")]
+pub type Spec = {
+  name: String,
+  # Data or prose rather than code.
+  is_code: Bool,
+  line_comments: [String],
+  # Bytes that, right after a line comment marker, make it no comment.
+  not_before: String,
+  block_comment: Option[(String, String)],
+  # A second block comment, which the first does not close.
+  other_block: Option[(String, String)],
+  nested_comments: Bool,
+  # Code to its close or to the end of the line.
+  pragma: Option[(String, String)],
+  # Documentation written as code, counted as comment.
+  doc_attributes: [(String, String)],
+  # Bytes that make a comment of a line from its first column.
+  column_one: String,
+  # What makes code of a comment marker that it follows, in any case.
+  directives: [String],
+  # A backslash escapes inside a quoted string.
+  escapes: Bool,
+  single_quotes: Bool,
+  triple_quotes: Bool,
+  # A triple-quoted string counts as comment.
+  triple_comments: Bool,
+  # A quoted string may span lines without a trailing backslash.
+  quotes_span_lines: Bool,
+  backticks: Backticks,
+  raw_strings: Bool,
+  cpp_raw: Bool,
+  verbatim: Bool,
+  heredocs: Option[Heredocs],
+  regex: Option[ValueStart],
+  sigils: Bool,
+  percent: Bool,
+  # A quote after `$` names a variable.
+  dollar_quotes: Bool,
+  # Outside a string a backslash escapes; inside `'…'` nothing does.
+  shell_quoting: Bool,
+  # `?"` is the code of a character.
+  char_codes: Bool,
+  # A `#` is a comment only where a word starts.
+  hash_at_word_start: Bool,
+  # `$#` is code.
+  dollar_hash: Bool
+}
+
+#[doc("A language without comments whose strings are double-quoted and escape with a backslash: the base every spec spreads.")]
+pub const PLAIN : Spec = Spec {
+  name: "",
+  is_code: true,
+  line_comments: [],
+  not_before: "",
+  block_comment: None,
+  other_block: None,
+  nested_comments: false,
+  pragma: None,
+  doc_attributes: [],
+  column_one: "",
+  directives: [],
+  escapes: true,
+  single_quotes: false,
+  triple_quotes: false,
+  triple_comments: false,
+  quotes_span_lines: false,
+  backticks: TicksCode,
+  raw_strings: false,
+  cpp_raw: false,
+  verbatim: false,
+  heredocs: None,
+  regex: None,
+  sigils: false,
+  percent: false,
+  dollar_quotes: false,
+  shell_quoting: false,
+  char_codes: false,
+  hash_at_word_start: false,
+  dollar_hash: false
+}
+
+#[doc("How a file is recognized as written in a language, and the language's spec, built when a file needs it.")]
+pub type Language = {
+  name: String,
+  extensions: [String],
+  filenames: [String],
+  shebangs: [String],
+  spec: () -> Spec
+}

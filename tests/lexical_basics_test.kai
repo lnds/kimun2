@@ -1,0 +1,163 @@
+# Line classification as km pins it: C, Rust and Kaikai.
+
+import km2.languages
+import km2.lines
+
+fn counts(path: String, src: String) : (Int, Int, Int) = match languages.detect(path, src) {
+  None -> (-1, -1, -1)
+  Some(spec) -> {
+    let t = lines.tally(spec, src)
+    (t.blank, t.comment, t.code)
+  }
+}
+
+fn c(src: String) : (Int, Int, Int) = counts("a.c", src)
+
+fn rs(src: String) : (Int, Int, Int) = counts("a.rs", src)
+
+fn kai(src: String) : (Int, Int, Int) = counts("a.kai", src)
+
+test "c: blank lines, whitespace only" {
+  assert c("  \n\n  \n") == ((3, 0, 0))
+  assert c("   \n  \n\n") == ((3, 0, 0))
+  assert c("") == ((0, 0, 0))
+}
+
+test "c: code, line comments, trailing comments" {
+  assert c("int x = 1;\nreturn x;\n") == ((0, 0, 2))
+  assert c("// this is a comment\n") == ((0, 1, 0))
+  assert c("int x = 1; // init x\n") == ((0, 0, 1))
+  assert c("  // indented comment\n") == ((0, 1, 0))
+  assert c("\nint x = 1;\n// comment\n\nint y = 2; // trailing\n") == ((2, 1, 2))
+  assert c("// line 1\n// line 2\n// line 3\n") == ((0, 3, 0))
+}
+
+test "c: a byte order mark is no text" {
+  assert c("\u{feff}// header\nint x = 1;\n") == ((0, 1, 1))
+  assert c("\u{feff}") == ((0, 0, 0))
+}
+
+test "c: comment markers inside strings open nothing" {
+  assert c("char *s = \"// not a comment\";\n") == ((0, 0, 1))
+  assert c("char *s = \"he said \\\"hello\\\"\";\n") == ((0, 0, 1))
+  assert c("char *s = \"test\\\n") == ((0, 0, 1))
+  assert c("char *s = \"/* not a comment */\";\n") == ((0, 0, 1))
+  assert c("char *s = \"unterminated\nint x = 1;\n") == ((0, 0, 2))
+}
+
+test "c: a string goes on past a line that ends with a backslash" {
+  assert c("char *s = \"a \\\n/* b\";\nint x;\n") == ((0, 0, 3))
+  assert c("if (c == '\"') return strcmp(s, \"/*\");\nint a;\nint b;\n") == ((0, 0, 3))
+}
+
+test "c: block comments" {
+  assert c("/* comment */\n") == ((0, 1, 0))
+  assert c("/*\n * line 1\n * line 2\n */\n") == ((0, 4, 0))
+  assert c("int x = 1; /* comment */\n") == ((0, 0, 1))
+  assert c("/*\n\n */\n") == ((0, 3, 0))
+  assert c("/* outer /* inner */ code_here;\n") == ((0, 0, 1))
+}
+
+test "c: binary detection leaves text alone" {
+  assert c("int x = 1;\n// comment\n\n") == ((1, 1, 1))
+}
+
+test "rust: nested block comments" {
+  assert rs("/* outer /* inner */ still comment */\n") == ((0, 1, 0))
+  assert rs("/* outer\n/* inner */\nstill comment\n*/\ncode();\n") == ((0, 4, 1))
+}
+
+test "rust: lifetimes open no string" {
+  assert rs("fn foo<'a>(x: &'a str) -> &'a str {\n") == ((0, 0, 1))
+  assert rs("static S: &'static str = \"hello\"; // comment\n") == ((0, 0, 1))
+}
+
+test "rust: raw strings hold quotes and comment markers" {
+  let manifest =
+    "fn main() {\n    let manifest = r#\"{ \"workspaces\": [\"packages/*\"] }\"#;\n    println!(\"{manifest}\");\n    let n = 1;\n}"
+  assert rs(manifest) == ((0, 0, 5))
+  assert rs(
+    "let a = r##\"one \"# /* still text\"##; // closed\nlet b = r\"C:\\\"; /* comment */\nlet c = 1;"
+  )
+    == ((
+      0,
+      0,
+      3
+    ))
+  assert rs("let a = r#\"x\"#; /*\nstill a comment\n*/") == ((0, 2, 1))
+  assert rs("let text = r#\"\n// not a comment\n/* nor this\n\"#;\nlet n = 1; // one")
+    == ((0, 0, 5))
+  assert rs("let a = br#\"a \"/*\" b\"#;\nlet n = 1;") == ((0, 0, 2))
+  assert rs("let a = cr#\"a \"/*\" b\"#;\nlet n = 1;") == ((0, 0, 2))
+}
+
+test "rust: a raw string opens only where a word starts" {
+  let src =
+    "let r#type = 1; /* one */ let s = \"a\"; /*\ncomment */\nlet x = car\"/*\"; /*\ncomment */\nlet y = abr#\"/*\"; /*\ncomment */"
+  assert rs(src) == ((0, 3, 3))
+  assert rs("x = r#\"a \"/*\" b\"#;\ny = 1;") == ((0, 0, 2))
+  assert c("x = r#\"a \"/*\" b\"#;\ny = 1;") == ((0, 1, 1))
+}
+
+test "rust: strings span lines" {
+  assert rs("let s = \"a\n/* b\n c */\";\nlet t = 1;\n") == ((0, 0, 4))
+  assert rs("let q = '\"'; let s = \"/*\";\nlet a = 1;\n") == ((0, 0, 2))
+}
+
+test "rust: a first line holding a shebang-like attribute is code" {
+  assert rs("#![doc = r#\"\n// c\n") == ((0, 1, 1))
+}
+
+test "kaikai: comments, strings and characters" {
+  assert kai("# a comment\nfn add(a: Int, b: Int) : Int = a + b\n") == ((0, 1, 1))
+  assert kai("let s = \"hi #" ++ "{name}\"\n") == ((0, 0, 1))
+  assert kai("let c = 'A'\n") == ((0, 0, 1))
+  assert kai("let m = \"\"\"\nfirst\nsecond\n\"\"\"\n") == ((0, 0, 4))
+  assert kai("let m = \"\"\"# not a comment\"\"\"\n") == ((0, 0, 1))
+}
+
+test "kaikai: doc attributes are comment, other attributes code" {
+  assert kai("#[constructor]\nfn make() : Int = 1\n") == ((0, 0, 2))
+  assert kai("#[doc(\"Adds two integers.\")]\nfn add(a: Int, b: Int) : Int = a + b\n")
+    == ((0, 1, 1))
+  assert kai(
+    "#[doc(\"\"\"\nSummary line.\nfn not_really_code() : Int = 42\n\"\"\")]\nfn f() : Int = 1\n"
+  )
+    == ((
+      0,
+      4,
+      1
+    ))
+  assert kai("#[doc(\"\"\"\nsee list(xs)] for details\n\"\"\")]\nfn f() : Int = 1\n") == ((0, 3, 1))
+  assert kai("#[doc(\"count #" ++ "{n} items\")]\n") == ((0, 1, 0))
+}
+
+test "whitespace km's byte test does not take: VT is code, FF is not" {
+  assert c("\u{b}// c\n") == ((0, 0, 1))
+  assert c("\u{c}// c\n") == ((0, 1, 0))
+}
+
+test "a non-ASCII byte is code" {
+  assert c("\u{a0}// c\n") == ((0, 0, 1))
+}
+
+fn show(k: lines.LineKind) : String = match k {
+  lines.Blank -> "blank"
+  lines.Comment -> "comment"
+  lines.Code -> "code"
+}
+
+test "kinds: one per line in order, and they add up to the tally" {
+  let src = "// a\n\nint x; /* b\n c */\n\"s\"\n"
+  let kinds = match languages.detect("a.c", src) {
+    Some(spec) -> lines.kinds(spec, src) | show
+    None -> []
+  }
+  assert kinds == ["comment", "blank", "code", "comment", "code"]
+  let counted = (
+    list.count(kinds, k => k == "blank"),
+    list.count(kinds, k => k == "comment"),
+    list.count(kinds, k => k == "code")
+  )
+  assert counted == c(src)
+}

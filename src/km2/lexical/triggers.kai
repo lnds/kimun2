@@ -1,0 +1,93 @@
+# The bytes at which something may open in normal state, per language:
+# every other byte is plain code or space, skipped without a step.
+
+import km2.languages.spec.{Spec, TicksCode}
+import collections.vec
+import km2.lexical.bytes.{byte, one_of, is_space}
+
+#[doc("What a byte may open: nothing, something, or, for a letter that prefixes a raw string, something when one of the bytes `Lexer` keeps for it follows.")]
+pub type Trigger = Int
+
+#[doc("A byte that opens nothing.")]
+pub const PLAIN_BYTE : Trigger = 0
+
+#[doc("A byte where a step must look.")]
+pub const OPENS : Trigger = 1
+
+#[doc("The first trigger of a prefix letter; the letter's index in `prefixes` follows it.")]
+pub const PREFIX : Trigger = 2
+
+#[doc("The letters that prefix a raw string, each with the bytes that may follow it in one.")]
+pub fn prefixes(spec: Spec) : [(Int, String)] {
+  let rust = if spec.raw_strings { [(114, "\"#"), (98, "r"), (99, "r")] } else { [] }
+  let cpp = if spec.cpp_raw { [(82, "\""), (117, "8R"), (85, "R"), (76, "R")] } else { [] }
+  rust ++ cpp
+}
+
+fn firsts(markers: [String]) : String = markers | (m => string.slice(m, 0, 1)) |> string.join("")
+
+fn pair_first(p: Option[(String, String)]) : String = match p {
+  Some((open, _)) -> string.slice(open, 0, 1)
+  None -> ""
+}
+
+fn flag(on: Bool, bytes: String) : String = if on { bytes } else { "" }
+
+fn opens_backtick(spec: Spec) : Bool = match spec.backticks {
+  TicksCode -> false
+  _ -> true
+}
+
+fn opening_bytes(spec: Spec) : String =
+  [
+    "\"'",
+    firsts(spec.line_comments),
+    pair_first(spec.block_comment),
+    pair_first(spec.other_block),
+    pair_first(spec.pragma),
+    spec.doc_attributes | (p => pair_first(Some(p))) |> string.join(""),
+    flag(opens_backtick(spec), "`"),
+    flag(option.is_some(spec.regex), "/"),
+    flag(option.is_some(spec.heredocs), "<"),
+    flag(spec.char_codes, "?"),
+    flag(spec.percent, "%"),
+    flag(spec.sigils, "~"),
+    flag(spec.verbatim, "@$")
+  ]
+    |> string.join("")
+
+fn mark_opening(t: Vec[Int], opens: String, i: Int) : Vec[Int] =
+  if i >= string.byte_length(opens) {
+    t
+  } else {
+    mark_opening(vec_set(t, byte(opens, i), OPENS), opens, i + 1)
+  }
+
+fn mark_prefixes(t: Vec[Int], letters: [(Int, String)], k: Int) : Vec[Int] = match letters {
+  [] -> t
+  [(letter, _), ...rest] -> mark_prefixes(vec_set(t, letter, PREFIX + k), rest, k + 1)
+}
+
+#[doc("The trigger of every byte value for a language.")]
+pub fn table(spec: Spec) : Vec[Int] {
+  let plain = vec.make(256, PLAIN_BYTE)
+  mark_opening(mark_prefixes(plain, prefixes(spec), 0), opening_bytes(spec), 0)
+}
+
+#[doc("The first offset from `i` below `n` where a step must look, and whether code was skipped; `nexts` holds the bytes that may follow each prefix letter.")]
+pub fn skip_plain(t: Vec[Int], nexts: Vec[String], line: String, i: Int, n: Int, code: Bool) : (
+  Int,
+  Bool
+) =
+  if i >= n {
+    (i, code)
+  } else {
+    let b = byte(line, i)
+    let kind = vec_get(t, b)
+    if kind == OPENS
+      or (kind >= PREFIX and one_of(vec_get(nexts, kind - PREFIX), byte(line, i + 1))) {
+      (i, code)
+    } else {
+      skip_plain(t, nexts, line, i + 1, n, code or (not is_space(b)))
+    }
+  }

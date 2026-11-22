@@ -1,0 +1,5 @@
+<%# comment %>
+<%= @x %>
+<%# multi
+line %>
+<p>text</p>

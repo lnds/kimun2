@@ -1,0 +1,24 @@
+import km2.config
+
+test "exclude and kinds lists are read" {
+  let c = config.parse(
+    "[exclude]\ndirs = [\"vendor\"]\npatterns = [\"*.min.js\"]\n[kinds]\ndocs = [\"notes/**\"]\n"
+  ) ?? config.DEFAULT
+  assert c.exclude_dirs == ["vendor"]
+  assert c.exclude_patterns == ["*.min.js"]
+  assert c.kinds.docs == ["notes/**"]
+}
+
+test "a value of the wrong type anywhere discards the whole file" {
+  assert config.parse("[exclude]\ndirs = [\"vendor\"]\n[score]\nmodel = 5\n") == None
+  assert config.parse("[exclude]\ndirs = \"vendor\"\n") == None
+  assert config.parse("[smells]\nmax_lines = -1\n") == None
+}
+
+test "unknown sections and keys are ignored; a real accepts an integer" {
+  assert config.parse("[mystery]\nx = 1\n[dups]\nmax_dup_ratio = 3\nwhat = true\n") != None
+}
+
+test "text that is not TOML is no configuration" {
+  assert config.parse("[exclude\n") == None
+}

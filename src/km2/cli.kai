@@ -1,14 +1,37 @@
-#[doc("Exit code of a usage error, as km uses it.")]
+import ahu.cli
+import km2.loc_cli
+
+#[doc("Exit code of a usage error, as km (clap) uses it.")]
 pub const USAGE_ERROR : Int = 2
 
-#[doc("Runs the command `argv` names and returns the process exit code.")]
-pub fn dispatch(argv: [String]) : Int / Stderr = match argv {
+#[doc("The version km2 reports.")]
+pub const VERSION : String = "0.1.0"
+
+#[doc("The km2 command-line application: km's commands, as they are ported.")]
+pub fn application() : cli.App[File + Env + Process + Stdout + Stderr + Clock] =
+  cli.app("km2", "Code metrics over syntax trees, compatible with km")
+    |> cli.versioned(VERSION)
+    |> cli.add_command(loc_cli.command())
+
+#[doc("Runs km2 against `argv` and returns the process exit code, with km's exit codes.")]
+pub fn run(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock = match argv {
+  # km, through clap, prints the help on stderr and exits 2 when no command is given.
   [] -> {
-    Stderr.eprint("usage: km2 <command> [args...]")
+    Stderr.eprint(cli.render_help(application()))
     USAGE_ERROR
   }
-  [cmd, ..._] -> {
-    Stderr.eprint("km2: command not implemented yet: #{cmd}")
-    USAGE_ERROR
-  }
+  _ -> resolved(argv)
 }
+
+fn resolved(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock =
+  match cli.resolve(
+    application(),
+    argv
+  ) {
+    # ahu.cli exits 1 on a usage error; km, through clap, exits 2.
+    Err(error) -> {
+      Stderr.eprint("error: #{cli.error_message(error)}\n")
+      USAGE_ERROR
+    }
+    Ok(_) -> cli.run_argv(application(), argv)
+  }

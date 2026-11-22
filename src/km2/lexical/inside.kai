@@ -1,0 +1,75 @@
+# One step in each state: normal code, a literal, a block comment, a
+# documentation attribute.
+
+import km2.languages.{Spec}
+import km2.lexical.bytes.{byte, at, one_of}
+import km2.lexical.literals
+import km2.lexical.normal
+import km2.lexical.state.{State, Step, StNormal, StString, StBlock, StDoc, StDocString, StHeredoc, code_step, comment_step}
+
+fn step_string(line: String, i: Int, l: literals.Literal) : Step {
+  let (advance, closed, after) = literals.scan(line, i, l)
+  code_step(advance, if closed { StNormal } else { StString(after) })
+}
+
+fn step_docstring(line: String, i: Int, l: literals.Literal) : Step {
+  let (advance, closed, after) = literals.scan(line, i, l)
+  comment_step(advance, if closed { StNormal } else { StDocString(after) })
+}
+
+fn closed_block(open: String, close: String, depth: Int) : State =
+  if depth <= 1 { StNormal } else { StBlock(open, close, depth - 1) }
+
+fn step_block(spec: Spec, line: String, i: Int, open: String, close: String, depth: Int) : Step =
+  if spec.nested_comments and at(line, i, open) {
+    comment_step(string.byte_length(open), StBlock(open, close, depth + 1))
+  } else if at(line, i, close) {
+    comment_step(string.byte_length(close), closed_block(open, close, depth))
+  } else {
+    comment_step(1, StBlock(open, close, depth))
+  }
+
+fn step_doc_string(line: String, i: Int, close: String, l: literals.Literal) : Step {
+  let (advance, closed, after) = literals.scan(line, i, l)
+  comment_step(advance, StDoc(close, if closed { None } else { Some(after) }))
+}
+
+# A string that opens inside a documentation attribute, read with nothing
+# before it; a close that is a quote ends the attribute at its first
+# occurrence, so no string opens inside it.
+fn doc_string_open(spec: Spec, line: String, i: Int, close: String) : Step {
+  let opened = if one_of("\"'", byte(close, 0)) { None } else { literals.open(spec, line, i, i) }
+  match opened {
+    Some((width, l)) -> comment_step(width, StDoc(close, Some(l)))
+    None -> comment_step(1, StDoc(close, None))
+  }
+}
+
+# Inside a documentation attribute every byte is comment; its strings are
+# followed so that its close inside one does not close it.
+fn step_doc(
+  spec: Spec,
+  line: String,
+  i: Int,
+  close: String,
+  inner: Option[literals.Literal]
+) : Step =
+  match inner {
+    Some(l) -> step_doc_string(line, i, close, l)
+    None ->
+      if at(line, i, close) {
+        comment_step(string.byte_length(close), StNormal)
+      } else {
+        doc_string_open(spec, line, i, close)
+      }
+  }
+
+#[doc("One step at `i` in any state but a heredoc's text, which is read whole.")]
+pub fn step(spec: Spec, line: String, i: Int, state: State) : Step = match state {
+  StNormal -> normal.step(spec, line, i)
+  StString(l) -> step_string(line, i, l)
+  StDocString(l) -> step_docstring(line, i, l)
+  StBlock(open, close, depth) -> step_block(spec, line, i, open, close, depth)
+  StDoc(close, inner) -> step_doc(spec, line, i, close, inner)
+  StHeredoc(_) -> Step { ...comment_step(0, state), comment: false, stop: true }
+}

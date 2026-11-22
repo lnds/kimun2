@@ -1,0 +1,166 @@
+# Detection and the literal readers on their own, as km pins them.
+
+import km2.languages
+import km2.languages.spec.{Spec, PLAIN}
+import km2.lexical.delim
+import km2.lexical.delim.{Delim, delimited}
+import km2.lexical.characters
+import km2.lexical.marked
+import km2.lexical.template
+import km2.lexical.template.{Frame, FrameText}
+
+fn name(o: Option[Spec]) : String = match o {
+  Some(s) -> s.name
+  None -> "-"
+}
+
+fn by_name(path: String) : String = name(languages.by_name(path))
+
+test "detection by file name and extension" {
+  assert by_name("main.rs") == "Rust"
+  assert by_name("script.py") == "Python"
+  assert by_name("Makefile") == "Makefile"
+  assert by_name("Dockerfile") == "Dockerfile"
+  assert by_name("file.xyz123") == "-"
+  assert by_name("randomfile") == "-"
+  assert by_name("component.heex") == "HTML EEx"
+  assert by_name("es.po") == "PO File"
+  assert by_name("default.pot") == "PO File"
+  assert by_name("main.kai") == "Kaikai"
+  assert by_name("App.jsx") == "JSX"
+  assert by_name("App.tsx") == "TypeScript"
+  assert by_name("docs/index.rst") == "reStructuredText"
+  assert by_name("src/parser.y") == "yacc"
+  assert by_name("src/lexer.l") == "lex"
+  assert by_name("lib/web/page.html.eex") == "EEx"
+  assert by_name("CMakeLists.txt") == "CMake"
+  assert by_name("cmake/fmt.cmake") == "CMake"
+  assert by_name("src/builtin.jq") == "jq"
+  assert by_name("include/a.hh") == "C++"
+  assert by_name("notes.txt") == "Text"
+}
+
+test "detection of the Fortrans and Pascal" {
+  assert by_name("a.f") == "Fortran 77"
+  assert by_name("a.FOR") == "Fortran 77"
+  assert by_name("a.f77") == "Fortran 77"
+  assert by_name("a.f90") == "Fortran 90"
+  assert by_name("a.F90") == "Fortran 90"
+  assert by_name("a.f95") == "Fortran 95"
+  assert by_name("a.f03") == "Fortran 2003"
+  assert by_name("a.f08") == "Fortran 2008"
+  assert list.all(["a.pas", "a.dpr", "a.dpk", "a.lpr", "a.pp"], p => by_name(p) == "Pascal")
+}
+
+test "an extension is the part after the last dot of the file name" {
+  assert by_name(".bashrc") == "-"
+  assert by_name("a.d/Makefile") == "Makefile"
+  assert by_name("a.C") == "-"
+  assert by_name("dir.rs/notes") == "-"
+}
+
+test "a header whose text only C++ writes is C++" {
+  let cpp = "#pragma once\nnamespace fmt {\nint f();\n}\n"
+  assert by_name("a.h") == "C"
+  assert name(languages.detect("a.h", cpp)) == "C++"
+  assert name(
+    languages.detect(
+      "a.h",
+      "#ifndef JV_H\n#ifdef __cplusplus\nextern \"C\" {\n#endif\nint jv(void);\n"
+    )
+  )
+    == "C"
+  assert name(languages.detect("a.c", cpp)) == "C"
+}
+
+fn shebang(line: String) : String = name(languages.by_shebang(line))
+
+test "detection by shebang, by the prefix of the program" {
+  assert shebang("#!/usr/bin/python3\n") == "Python"
+  assert shebang("#!/usr/bin/env python3\n") == "Python"
+  assert shebang("#!/usr/bin/env -S python3 -u\n") == "Python"
+  assert shebang("#!/bin/bash\n") == "Bourne Again Shell"
+  assert shebang("#!/usr/bin/env node\n") == "JavaScript"
+  assert shebang("print('hello')\n") == "-"
+  assert shebang("#!/usr/bin/unknownlang\n") == "-"
+  assert shebang("#!/bin/sh5") == "Bourne Shell"
+  assert shebang("#!python") == "-"
+  assert name(languages.detect("run", "#!/usr/bin/env ruby\nputs 1\n")) == "Ruby"
+}
+
+test "which languages hold data or prose" {
+  let prose =
+    ["a.json", "a.yaml", "a.toml", "a.xml", "a.md", "a.rst", "a.txt", "a.properties", "a.po"]
+  assert list.all(prose, p => (languages.by_name(p) |> option.map(s => s.is_code)) == Some(false))
+  assert (languages.by_name("a.rs") |> option.map(s => s.is_code)) == Some(true)
+}
+
+test "the length of a character literal" {
+  assert characters.character_len("a'", 0) == 2
+  assert characters.character_len("\\''", 0) == 3
+  assert characters.character_len("\\n' rest", 0) == 3
+  assert characters.character_len("\u{1F600}'", 0) == 5
+  assert characters.character_len("\\u{10FFFFF}'", 0) == 12
+  assert characters.character_len("abcdef", 0) == 0
+  assert characters.character_len("abcde'", 0) == 0
+  assert characters.character_len("\\u{10FFFFFF}'", 0) == 0
+  assert characters.character_len("", 0) == 0
+  assert characters.character_len("a> x", 0) == 0
+  assert characters.character_len("outer: loop", 0) == 0
+  assert characters.character_len("a' x", 0) == 2
+  assert characters.character_len("{' x", 0) == 2
+}
+
+# Where a template literal read from the start of `s` closes, past its close.
+fn template_close(s: String, i: Int, frames: [Frame]) : Int =
+  if i >= string.byte_length(s) {
+    -1
+  } else {
+    let (advance, after) = template.scan(s, i, frames)
+    if list.is_empty(after) { i + advance } else { template_close(s, i + advance, after) }
+  }
+
+test "a template literal closes past its interpolations" {
+  assert template_close("a ${b} c` d", 0, [FrameText]) == 9
+  assert template_close("a ${ {x: `y`}.x } c` d", 0, [FrameText]) == 20
+  assert template_close("${ \"`\" }` d", 0, [FrameText]) == 9
+  assert template_close("a \\` b", 0, [FrameText]) == (-1)
+}
+
+# Where a delimited literal read from the start of `s` closes, past its close.
+fn delim_close(s: String, i: Int, d: Delim) : Int =
+  if i >= string.byte_length(s) {
+    -1
+  } else {
+    let (advance, closed, after) = delim.scan(s, i, d)
+    if closed { i + advance } else { delim_close(s, i + advance, after) }
+  }
+
+test "a verbatim string takes a doubled quote for one" {
+  let d = Delim { ...delimited("\"", false, true), doubled: true }
+  assert delim_close("a \"\"b\"\" c\" d", 0, d) == 10
+}
+
+test "brackets nest in a percent literal, not in one that does not nest" {
+  let nests = Delim { ...delimited(")", true, true), nests: Some((40, 0)) }
+  assert delim_close("a (b) c) d", 0, nests) == 8
+  assert delim_close("a ((b)) c)", 0, nests) == 10
+  assert delim_close("a (b c", 0, nests) == (-1)
+  assert delim_close("a (b) c)", 0, delimited(")", true, true)) == 5
+  assert delim_close("a ( b! c", 0, delimited("!", true, true)) == 6
+}
+
+fn spec(path: String) : Spec = languages.by_name(path) ?? PLAIN
+
+test "the quotes that open nothing" {
+  let rb = spec("a.rb")
+  let sh = spec("a.sh")
+  assert marked.quote_opens_nothing(rb, "after = $'", 0, 9)
+  assert marked.quote_opens_nothing(sh, "x=it\\'s", 0, 5)
+  assert marked.quote_opens_nothing(sh, "x=a\\\\\\'b", 0, 6)
+  assert not marked.quote_opens_nothing(sh, "x=a\\\\'b'", 0, 5)
+  assert not marked.quote_opens_nothing(sh, "x = 'a'", 0, 4)
+  assert not marked.quote_opens_nothing(rb, "x = 'a'", 0, 4)
+  assert not marked.quote_opens_nothing(rb, "x\\'", 0, 2)
+  assert not marked.quote_opens_nothing(sh, "x=$'a'", 0, 4)
+}

@@ -1,0 +1,3 @@
+# comment
+all:
+	echo '# no'

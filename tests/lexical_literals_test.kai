@@ -1,0 +1,127 @@
+# Literals that span lines, heredocs, regular expressions and the quotes
+# that open nothing, as km pins them.
+
+import km2.languages
+import km2.lines
+
+fn counts(path: String, src: String) : (Int, Int, Int) = match languages.detect(path, src) {
+  None -> (-1, -1, -1)
+  Some(spec) -> {
+    let t = lines.tally(spec, src)
+    (t.blank, t.comment, t.code)
+  }
+}
+
+# The comment and code counts of a line followed by a comment and a line of code.
+fn followed(path: String, line: String, comment: String, code: String) : (Int, Int) {
+  let (_, c, k) = counts(path, line ++ "\n" ++ comment ++ "\n" ++ code ++ "\n")
+  (c, k)
+}
+
+fn rb(line: String) : (Int, Int) = followed("a.rb", line, "# counts the items", "x = 1")
+
+fn ex(line: String) : (Int, Int) = followed("a.ex", line, "# doubles it", "x = 1")
+
+fn sh(line: String) : (Int, Int) = followed("a.sh", line, "# says yes", "echo $x")
+
+# `#` and `{` apart, so that no interpolation opens here.
+fn interp(before: String, after: String) : String = before ++ "#" ++ "{" ++ after
+
+test "template literals, text blocks, verbatim and raw strings span lines" {
+  assert counts("a.js", "const files = glob(`${root}/*.js`);\nconst a = 1;\nconst b = 2;\n")
+    == ((0, 0, 3))
+  assert counts("a.ts", "const q = `\n  // not a comment\n  /* nor this ${x}\n`;\nlet y = 1;\n")
+    == ((0, 0, 5))
+  assert counts("a.java", "String q = \"\"\"\n  /* not a comment\n  \"\"\";\nint a;\n")
+    == ((0, 0, 4))
+  assert counts("a.cs", "var q = @\"\n// not a comment \"\"x\"\"\n\";\nint a;\n") == ((0, 0, 4))
+  assert counts("a.cpp", "auto q = R\"(\n/* not a comment\n)\";\nint a;\n") == ((0, 0, 4))
+  assert counts("a.go", "q := `\n// not a comment\n`\nvar a int\n") == ((0, 0, 4))
+}
+
+test "heredocs: the text is code up to the terminator" {
+  assert counts("a.sh", "cat <<EOF > conf\n# not a comment\nEOF\n# a comment\n") == ((0, 1, 3))
+  assert counts("a.php", "$s = <<<SQL\n  /* not a comment\n  SQL;\n$a = 1;\n") == ((0, 0, 4))
+  assert counts("a.rb", "q = <<~SQL\n  # not a comment\nSQL\n# a comment\n") == ((0, 1, 3))
+  assert counts("a.sh", "cat <<<word\n# text\n") == ((0, 0, 2))
+  assert counts("a.sh", "cat <<A <<B\nB\n# not a comment\nA\n# a comment\n") == ((0, 1, 4))
+  assert counts("a.sh", "cat << EOF\n# a comment\n") == ((0, 1, 1))
+}
+
+test "php: attributes are code, hash and slashes comment" {
+  assert counts("a.php", "<?php\n# a comment\n#[Attribute]\n$a = 1; # trailing\n") == ((0, 1, 3))
+  assert counts("a.php", "//[x]\n") == ((0, 0, 1))
+}
+
+test "shell: counts and hashes inside words are code" {
+  assert counts("a.sh", "echo $# \"/*\"\necho ${#x}\n") == ((0, 0, 2))
+}
+
+test "ruby: regular expressions and percent literals hold quotes" {
+  assert rb("PATTERN = /\"/") == ((1, 2))
+  assert rb("PATTERN = /it's/") == ((1, 2))
+  assert rb("WORDS = %w(it's (a) b)") == ((1, 2))
+  assert rb("url.sub %r{^a/\"}, \"b\"") == ((1, 2))
+  assert rb("parts = line.split /'/") == ((1, 2))
+  assert rb("puts /it's/.match?(x)") == ((1, 2))
+}
+
+test "ruby: operators that are no literal" {
+  assert rb("x = a % b # rest") == ((1, 2))
+  assert rb("x %= 3") == ((1, 2))
+  assert rb("x = a %-b # it's") == ((1, 2))
+  assert rb("ops = [:+, :-, :%, :*]") == ((1, 2))
+  assert rb("a.public_send(:%, b)") == ((1, 2))
+  assert rb("x = [1, 2].inject(:/) + \"a/b\"") == ((1, 2))
+  assert rb("x = a / b # it's") == ((1, 2))
+}
+
+test "ruby: quotes that open nothing" {
+  assert rb("after = $'") == ((1, 2))
+  assert rb("SEPS = [?%, ?&]") == ((1, 2))
+  assert rb("sep = s[-1] == ?/ ? \"\" : \"a/b\"") == ((1, 2))
+}
+
+test "ruby: a literal that interpolates is read as code up to its hash" {
+  assert rb(interp("re = /", "File.join(\"a\", \"b/c\")}x/")) == ((1, 2))
+  assert rb(interp("x = %Q|", "f(\"|\")} it's|")) == ((1, 2))
+  assert rb(interp("x = %Q(", "f(x)} it's)")) == ((1, 2))
+}
+
+test "ruby: a regular expression after a call, and a spanning percent literal" {
+  assert counts("a.rb", "Then(/^I see \"([^\"]*)\"$/) do |t|\n# counts the items\nx = 1\nend\n")
+    == ((0, 1, 3))
+  let src = "config.paths = %W(\n  " ++ interp("", "root}/app\n  ") ++ interp("", "root}/lib\n)\n")
+  assert counts("a.rb", src) == ((0, 0, 4))
+}
+
+test "perl: a quote after a dollar names a variable" {
+  assert counts("a.pl", "local $\" = \",\";\n# counts the items\nmy $x = 1;\n") == ((0, 1, 2))
+}
+
+test "elixir: sigils hold quotes" {
+  assert ex("@re ~r/\"/") == ((1, 2))
+  assert ex("@specials ~c|()<>@,;:\\\\\"/[]?={}|") == ((1, 2))
+  assert ex("@upper ~S|\"|") == ((1, 2))
+  assert ex(interp("x = ~s(", "f(x)} say \"hi)")) == ((1, 2))
+}
+
+test "shell: single quotes escape nothing, a backslash escapes outside" {
+  assert sh("x=it\\'s") == ((1, 2))
+  assert sh("x=a\\\\'b'") == ((1, 2))
+  assert sh("echo 'C:\\' \"it's\"") == ((1, 2))
+  assert sh("x=$'it\\'s'") == ((1, 2))
+}
+
+test "javascript: regular expressions hold quotes and comment markers" {
+  assert counts("a.js", "const re = /`/;\n// note\nconst x = 1;\n") == ((0, 1, 2))
+  assert counts("a.js", "const re = /[/*]/;\nconst x = 1;\n// note\n") == ((0, 1, 2))
+  assert counts("a.jsx", "const A = () => <p>a</p>{`x/${y}`}<b>z</b>;\n// note\nconst x = 1;\n")
+    == ((0, 1, 2))
+  assert counts("a.js", "x = a / b / c;\n// it's a note\n") == ((0, 1, 1))
+}
+
+test "javascript: single quotes are strings" {
+  assert counts("a.js", "var s = '// not a comment';\n") == ((0, 0, 1))
+  assert counts("a.js", "var s = 'it\\'s';\nvar s = 'hello';\n") == ((0, 0, 2))
+}

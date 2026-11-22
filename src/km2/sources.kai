@@ -1,0 +1,72 @@
+# The source files of a walk: each file of a known language, by name or by
+# shebang, of a kind the run reads, without the Rust test modules when
+# tests are excluded.
+
+import fs.file
+import encoding.utf8
+import km2.languages
+import km2.languages.spec.{Spec}
+import km2.kinds
+import km2.kinds.{Kind, Selection}
+import km2.rust_tests
+import km2.selection
+import km2.selection.{Filter}
+import km2.walk
+
+#[doc("A file to measure: where it is, its language by name or shebang, and its kind.")]
+pub type Source = { path: String, spec: Spec, kind: Kind }
+
+fn first_line(src: String) : String = match string.split_once(src, "\n") {
+  Some(parts) -> parts.fst
+  None -> src
+}
+
+#[doc("A file's language without its content when its name tells, else by its shebang.")]
+pub fn language(p: String) : Option[Spec] / File = match languages.by_name(p) {
+  Some(s) -> Some(s)
+  None -> match file.read(p) {
+    Ok(src) -> {
+      let line = first_line(src)
+      if utf8.is_valid(string.bytes(line)) { languages.by_shebang(line) } else { None }
+    }
+    Err(_) -> None
+  }
+}
+
+fn source_of(root: String, sel: Selection, p: String) : Option[Source] / File {
+  let spec = language(p)!
+  let kind = kinds.of(sel, p, selection.relative(root, p), spec.name, spec.is_code)
+  if kinds.reads(sel, kind) { Some(Source { path: p, spec: spec, kind: kind }) } else { None }
+}
+
+fn rust_modules(sources: [Source]) : [String] / File {
+  let rust = sources |? (s => s.spec.name == "Rust") | .path
+  rust
+    || (p => match file.read(p) {
+      Ok(src) -> rust_tests.test_modules(p, src, rust)
+      Err(_) -> []
+    })
+}
+
+#[doc("The Rust files declared as `#[cfg(test)]` modules among the sources.")]
+pub fn test_modules(sources: [Source]) : [String] / File = rust_modules(sources)
+
+#[doc("The source files under `root`, in walk order.")]
+pub fn files(
+  root: String,
+  exclude_tests: Bool,
+  filter: Filter,
+  sel: Selection
+) : [Source] / File + Env {
+  let found = walk.files(root, exclude_tests, filter)
+    || (p => match source_of(root, sel, p) {
+      Some(s) -> [s]
+      None -> []
+    })
+  if exclude_tests {
+    let modules = rust_modules(found)
+    found |? (s => not rust_tests.in_test_module(s.path, modules))
+  } else {
+    found
+  }
+}

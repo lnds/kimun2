@@ -1,0 +1,34 @@
+import km2.ts
+
+fn nodes(grammar: String, src: String) : Int / Ffi {
+  let d = ts.parse(grammar, src)
+  let n = if ts.parsed(d) { ts.count(d) } else { -1 }
+  ts.free(d)
+  n
+}
+
+fn captures(grammar: String, src: String, query: String) : Int / Ffi {
+  let q = ts.query(grammar, query)
+  let d = ts.parse(grammar, src)
+  let n = ts.run(d, q)
+  ts.free(d)
+  ts.query_free(q)
+  n
+}
+
+test "a rust source parses into a flattened tree" {
+  assert nodes("rust", "fn f() {}\n") > 1
+}
+
+test "an unknown grammar parses nothing" {
+  assert nodes("cobol", "x") == (-1)
+}
+
+test "a file with a syntax error still parses" {
+  assert nodes("kaikai", "fn (((\n") > 0
+}
+
+test "the shim evaluates #eq? on captured text" {
+  let q = "((attribute name: (lower_identifier) @n) @a (#eq? @n \"doc\"))"
+  assert captures("kaikai", "#[doc(\"x\")]\n#[constructor]\nfn f() : Int = 1\n", q) == 2
+}
