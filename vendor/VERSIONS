@@ -1,4 +1,4 @@
 # name          repository                                          ref
 tree-sitter     https://github.com/tree-sitter/tree-sitter.git      v0.27.2
 rust            https://github.com/tree-sitter/tree-sitter-rust.git v0.24.2
-kaikai          https://github.com/kaikailang-org/tree-sitter-kaikai.git 91a419bff14191dc53380f17708a5a46971d12a0
+kaikai          https://github.com/kaikailang-org/tree-sitter-kaikai.git v0.3.0
