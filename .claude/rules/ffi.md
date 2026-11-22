@@ -24,6 +24,10 @@ kaikai reaches tree-sitter through `c/kts.c` and nothing else. Read
   A string the shim returns must stay valid until the call returns, and
   no longer: point into the document's own source or a buffer owned by
   the handle, never a `static` buffer.
+- **ERROR and MISSING nodes carry symbols past the grammar's table**
+  (`ts_builtin_sym_error` is 65535): a table indexed by symbol is
+  checked against its length, or a file with a syntax error crashes the
+  run.
 - **Integer widths are explicit.** tree-sitter speaks `uint32_t`; the
   bindings use `U32` (or `Int` where the shim widens on purpose), and an
   absent node is `-1`.
@@ -43,11 +47,20 @@ kaikai reaches tree-sitter through `c/kts.c` and nothing else. Read
 
 ## Concurrency
 
-Files are parsed in parallel fibers.
+Files are parsed in parallel, on ahu cells (`ahu.cell`): a resource that
+lives across calls is owned by a cell, the shape henua requires of
+anything with a lifecycle.
 
-- **No mutable `static` or global state in the shim.** One `TSParser` per
-  parse (or per worker), never shared.
-- A `Doc` is used by the fiber that created it; nothing in the shim locks.
+- **A worker cell owns its parser.** It creates its `TSParser` when it
+  starts, frees it when it stops, and is the only fiber that calls the
+  shim with it. Callers talk to the cell through its mailbox and never
+  carry `Ffi` in their rows.
+- **No mutable `static` or global state in the shim.** Nothing is shared
+  between parsers.
+- A `Doc` lives and dies inside the cell that parsed it; only the metrics
+  computed from it leave the cell.
+- A cell that crashes on a file is restarted by `ahu.restart`; the file
+  is reported as unreadable and the run goes on.
 - Language objects (`tree_sitter_rust()` and friends) are immutable and
   safe to share.
 

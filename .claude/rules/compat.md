@@ -30,6 +30,21 @@ guess of it. Compare against the released `km` binary
   `null`. Fields are added, never renamed, retyped or removed.
 - **Same exit codes**, including the gates (`--fail-below`,
   `--fail-on`, `--fail-if-worse`): CI depends on them.
+
+## Where ahu.cli and clap differ
+
+The command line is declared with `ahu.cli`; `km` uses clap. Known
+differences, and where each is handled:
+
+| Behaviour | km (clap) | ahu.cli | km2 |
+|---|---|---|---|
+| Usage error exit code | 2 | 1 | 2, in `src/km2/cli.kai` |
+| No command given | help on stderr, exit 2 | help on stdout, exit 0 | as km, in `src/km2/cli.kai` |
+| Short version flag | `-V` | `-v` | open: needs ahu.cli to name the short flag |
+| Error message prefix | `error:` | `Error:` | `error:`, in `src/km2/cli.kai` |
+
+A gap ahu.cli cannot express is raised upstream on ahu, not parsed
+around here.
 - **Same configuration**: `.kimun.toml` read with `km`'s precedence (CLI
   flag, then file, then default). New settings go in new sections or new
   keys.

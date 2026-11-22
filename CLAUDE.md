@@ -22,6 +22,18 @@ Kimün lives at `../kimun`; its `CLAUDE.md`, `README.md` and `src/cli.rs` are th
 | **queries** | what each language calls a function, a test, an assertion, a call | tree-sitter `.scm` |
 | **vendor** | the tree-sitter core and the grammars, pinned | C, generated |
 
+## The kaikai ecosystem
+
+km2 builds on the kaikai ecosystem first, and writes its own only what the ecosystem lacks:
+
+| Library | What km2 uses it for |
+|---|---|
+| **ahu** (`kaikailang-org/ahu`, concurrency and fault tolerance) | The analysis runs on ahu cells: a bounded set of worker cells, each owning its tree-sitter parser, so the FFI stays confined to the fiber that owns it. `ahu.restart` keeps one pathological file from ending a run: the file is reported as unreadable, as `km` reports it, and the rest is measured. `ahu.log` for structured diagnostics, `ahu.app.run_app` as the bootstrap. `ahu.cli` declares the command line: km's commands, arguments and options, help and version; `src/km2/cli.kai` keeps km's exit codes on top of it. |
+| **henua** (`kaikailang-org/henua`, domain building blocks) | The measurement domain is written in henua's vocabulary. Per-file results travel as domain events (`domain_event`, `event_bus`) to the reports that fold them (`aggregate.fold_events`), so a report never re-reads a file. Measured files are held behind the `Repository[a, i]` port with the in-memory adapter (`repository_effect.with_in_memory`), so metric code names the port, never the storage. `validation` checks `.kimun.toml` values into `Result`s. No SQL: henua's SQLite adapter and kohau are not used. |
+| **tree-sitter-kaikai** (`kaikailang-org/tree-sitter-kaikai`) | The grammar for kaikai sources, vendored like the others. |
+
+Each is pinned to a release tag in `kai.toml` and added when the first module uses it, never before. A bug in one of them is reported upstream with a repro, not patched here.
+
 ## Layout
 
 ```
@@ -58,7 +70,8 @@ Higher tier wins on conflict.
 
 4. **Performance similar to km, measured.** Wall time and peak RSS within 1.5× of `km` on the same inputs. One parse per file, shared by every metric. Numbers come from `bench/compare.sh` on real repositories, never from intuition.
 5. **One module crosses the FFI.** Everything above `ts.kai` is ordinary kaikai, testable without C.
-6. **Languages are data.** What a language calls a function, a test or an assertion lives in its `.scm` queries; the metric code does not name languages.
+6. **Languages are data.** What a language writes (comment markers, strings, doc attributes) lives in its `Spec` (`src/km2/languages.kai`); what it calls a function, a test or an assertion lives in its `.scm` queries. The metric code does not name languages.
+7. **tree-sitter where it pays off.** A tree is for what needs structure: functions, complexity, Halstead, smells, waste, imports and calls. Classifying lines (`loc`, the line kinds `indent` and `dups` read) is lexical, as km does it, and fast.
 
 ### Tie-breakers
 
@@ -86,7 +99,7 @@ Topic rules live in `.claude/rules/` and load by path:
 
 ## Things to avoid
 
-- **Do not scan source text where a tree exists.** Regexes over source text are what km2 exists to replace. The lexical path is kept only for languages without a grammar.
+- **Do not guess structure from text.** Where a metric needs to know what a function, a call or a test is, it asks the tree, never a regex. Where it only needs to know whether a line is code, comment or blank, it reads the line, never the tree.
 - **Do not depend on Kimün's code.** km2 shares behaviour with `km`, verified by differential tests, never code.
 - **Do not call a model.** Every result is deterministic and reproducible in CI.
 - **Do not edit `vendor/` by hand.** `scripts/vendor.sh` fetches the pinned versions; a change is a new pin.

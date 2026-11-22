@@ -39,13 +39,29 @@ that older examples (and older repos) do not reflect:
 - An effect performed in a dispatching-pipe stage appears in the enclosing
   row and must be handled or declared (0.196).
 
-## Reuse the stdlib before writing helpers
+## Reuse the stdlib and the ecosystem before writing helpers
 
-`fs/dir` (walking), `fs/file`, `os/args`, `os/process` (running `git`),
-`encoding/json`, `encoding/toml` (`.kimun.toml`), `regexp`, `collections`,
-`string_builder`, fibers and actors (parallel analysis). If something is
-missing or broken in the stdlib, open an issue on kaikai with a repro
-instead of working around it silently here.
+- Stdlib: `fs/dir` (walking), `fs/file`, `os/args`, `os/process`
+  (running `git`), `encoding/json`, `encoding/toml` (`.kimun.toml`),
+  `regexp`, `collections`, `string_builder`, `actor` (`with_mailbox`).
+- **ahu** for concurrency: `ahu.cell` (`with_cell`, `ask`, `keep`,
+  `cell_done`) for workers, `ahu.restart` (`with_restart`,
+  `restartable_cell`) for fault tolerance, `ahu.log` for structured
+  logging, `ahu.app.run_app` for the bootstrap, `ahu.cli` for the command
+  line (declared commands and options; `cli.resolve` is pure and is what
+  tests use). Do not hand-roll an argument parser, a message loop or a
+  supervisor.
+- **henua** for the domain: `domain_event` and `event_bus` carry
+  per-file results to reports, `aggregate.fold_events` folds them; the
+  `Repository[a, i]` effect (`find`, `save`, `delete`, `size`, `all`)
+  with `repository_effect.with_in_memory` holds measured files behind a
+  port; `validation` turns configuration values into `Result`s.
+  **No SQL**: do not import `henua.sqlite_repository` or kohau.
+  henua's `kai.toml` names kohau, so `kai fetch` brings it in; km2's
+  code never imports it.
+
+If something is missing or broken in any of them, open an issue upstream
+with a repro instead of working around it silently here.
 
 ## The four guarantees
 
@@ -114,10 +130,17 @@ line at the end of a function. `finally` does not run on `panic`.
   function body is an expression. Bind the result, do not declare a name
   and assign into it from branches.
 - **`=` for a direct function, `{ }` for several steps.**
-- **`var x := 0` is sugar over `State`** and does not leak into the
-  signature (book ch. 2.2, 12.7). A local counter does not make a
-  function effectful.
-- **Positional tuples `(a, b)`**, not `Pair { fst:, snd: }`.
+- **Iterate with pipes or tail recursion, not `while`.** A loop that
+  carries state is a tail-recursive function whose accumulators are its
+  parameters (`fn scan(line, i, n, acc) = if i >= n { acc } else {
+  scan(line, i + 1, n, ...) }`); a pass over a collection is a pipe or a
+  fold. A recursive call that is not in tail position (`1 + f(i + 1)`)
+  takes an accumulator instead. `var` is sugar over `State` and stays for
+  a local accumulation inside a pipe stage, not as a loop counter.
+  Mutual tail calls are eliminated too.
+- **Positional tuples `(a, b)`**, not `Pair { fst:, snd: }`. Do not
+  avoid tuples, records or variants for speed: a cost kaikai charges for
+  them is a kaikai issue (see `perf.md`).
 - **The core stdlib is auto-loaded**: no `import core.*`.
 - **`!` propagates** `None`/`Err` through the return type. It never
   raises; it is Rust's `?`.
@@ -184,6 +207,17 @@ against 0.196.3; none is in `kai info`.
 - **A lambda that assigns needs a block**: `i => { total := total + i }`.
 - **A one-variant sum needs the leading bar**: `type Msg = | Ping`, or
   the name is an alias and not a constructor.
+- **`??` cannot be a `|>` stage**: `r |> ok ?? 0` is rejected; write
+  `ok(r) ?? 0` or `(r |> ok) ?? 0`.
+- **`Actor[msg]` has no default handler at `main`**: code that talks to
+  an ahu cell runs inside
+  `with_mailbox(() => ...)` (`import actor.{with_mailbox}`).
+- **`map.update(m, k, default, f)` inserts `default` as is** when `k` is
+  absent; `f` runs only on a present key. To accumulate, write
+  `map.put(m, k, add(map.get(m, k) ?? zero, x))`.
+- **`Mutable` is not masked across calls**: a function that writes an
+  `Array` it was handed carries `/ Mutable`, and so does every caller up
+  to `main`, which has a default handler for it.
 - **`Stderr`'s op is `eprint`**, not `print`: `Stderr.eprint(msg)`.
 - **`const` names are `UPPER_SNAKE_CASE`**; `kai fmt` rejects anything
   else.

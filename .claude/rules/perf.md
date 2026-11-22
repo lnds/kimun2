@@ -5,6 +5,8 @@ paths:
   - "src/km2/syntax.kai"
   - "src/km2/files.kai"
   - "src/km2/metrics/**"
+  - "src/km2/lines.kai"
+  - "src/km2/lexical/**"
 ---
 
 # Performance and memory
@@ -40,3 +42,15 @@ is explained and recorded in `bench/results.md`.
   capped, and RSS is measured with the cap in place.
 - Allocation in the per-node path of the shim is a bug: flattening fills
   arrays sized once from the node count.
+- Hot lexical loops skip plain bytes without building a value per byte
+  (`skip_plain`, `skip_until`): a record per byte made the first `loc`
+  six times slower than `km`. That is an algorithm, not a workaround.
+- **Do not bend idiomatic kaikai around a kaikai performance gap.** km2
+  tests kaikai in the field: a gap (an aggregate that costs too much, a
+  slow stdlib function) is measured with a minimal repro, reported on
+  lnds/kaikai, and measured again on the release that fixes it. The
+  experiment that showed the cost is kept in `bench/results.md` as
+  evidence, and the code stays idiomatic.
+- Cross the FFI per useful node, not per node: every call costs, and the
+  kaikai side of the first tree-sitter `loc` spent as long in calls as the
+  parse itself.
