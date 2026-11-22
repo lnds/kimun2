@@ -1,0 +1,5 @@
+name = "km2"
+version = "0.1.0"
+entry = "src/main.kai"
+
+[dependencies]

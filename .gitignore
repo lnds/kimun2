@@ -1,0 +1,11 @@
+# kaikai
+_build/
+.kai-cache/
+# the binary `kai build` writes at the root
+/km2
+
+# benchmark scratch output
+bench/out/
+
+# OS
+.DS_Store

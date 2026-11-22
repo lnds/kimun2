@@ -1,0 +1,21 @@
+import km2.cli
+
+fn quiet(argv: [String]) : (Int, [String]) = handle {
+  cli.dispatch(argv)
+} with Stderr([]) {
+  eprint(s, resume) -> resume((), [...state, s])
+  is_tty(resume) -> resume(false, state)
+  return(code) -> (code, state)
+}
+
+test "an unimplemented command fails naming it" {
+  let (code, lines) = quiet(["cycom"])
+  assert code == cli.USAGE_ERROR
+  assert lines == ["km2: command not implemented yet: cycom"]
+}
+
+test "no command prints the usage" {
+  let (code, lines) = quiet([])
+  assert code == cli.USAGE_ERROR
+  assert lines == ["usage: km2 <command> [args...]"]
+}

@@ -1,0 +1,14 @@
+#[doc("Exit code of a usage error, as km uses it.")]
+pub const USAGE_ERROR : Int = 2
+
+#[doc("Runs the command `argv` names and returns the process exit code.")]
+pub fn dispatch(argv: [String]) : Int / Stderr = match argv {
+  [] -> {
+    Stderr.eprint("usage: km2 <command> [args...]")
+    USAGE_ERROR
+  }
+  [cmd, ..._] -> {
+    Stderr.eprint("km2: command not implemented yet: #{cmd}")
+    USAGE_ERROR
+  }
+}
