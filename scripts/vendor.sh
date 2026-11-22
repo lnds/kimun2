@@ -15,7 +15,15 @@ fetch() {
   if [ -n "$local_dir" ]; then
     printf '%s\n' "$local_dir"
   else
-    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$ref" "$repo" "$work/$name"
+    case $ref in
+      # A full commit id: fetch exactly that commit.
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
+        git init --quiet "$work/$name"
+        git -C "$work/$name" fetch --quiet --depth 1 "$repo" "$ref"
+        git -c advice.detachedHead=false -C "$work/$name" checkout --quiet FETCH_HEAD ;;
+      *)
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$ref" "$repo" "$work/$name" ;;
+    esac
     printf '%s\n' "$work/$name"
   fi
 }
