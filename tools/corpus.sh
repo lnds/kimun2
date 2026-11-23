@@ -6,6 +6,8 @@
 #   tools/corpus.sh run [LANGUAGE...]     `loc --include-tests --format json`
 #                                         on each repository, parsed and
 #                                         compared, with both run times
+#                                         (single warm runs, a rough guide;
+#                                         bench/compare.sh measures)
 #   tools/corpus.sh files REPO [ARGS...]  the same per file, for one
 #                                         repository (OWNER/REPO); ARGS go
 #                                         to loc, e.g. --include-ext rs
@@ -25,7 +27,7 @@ MANIFEST=${KM2_CORPUS_MANIFEST:-$(dirname "$0")/../tests/corpus/repos.tsv}
 CACHE=${KM2_CORPUS:-$HOME/.cache/km2-corpus}
 
 usage() {
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 }
 
@@ -98,6 +100,8 @@ run() {
       status=1
       continue
     fi
+    # An untimed run first, so both are timed with the files in the cache.
+    km loc --include-tests --format json "$dir" > /dev/null 2>&1
     t0=$(ms)
     a=$(km loc --include-tests --format json "$dir" 2>/dev/null | jq -S .)
     t1=$(ms)

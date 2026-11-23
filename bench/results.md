@@ -4,7 +4,25 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `loc`, complete, on kaikai 0.198.0 (current)
+## `loc` over the language corpus, after the glob strategies (current)
+
+`tools/corpus.sh run` over the 84 repositories of `tests/corpus/repos.tsv` (`loc --include-tests --format json`, one warm run each, a rough guide). Output equals km's on 81; the other 3 are lnds/kaikai#3512.
+
+Total: km 108.6 s, km2 117.6 s, 1.08×. 27 repositories at or below km's time, 49 between 1× and 1.5×, 5 above: microsoft/vcpkg 1.98×, felangel/bloc 1.65×, flame-engine/flame 1.64×, files-community/Files 1.54×, ghostty-org/ghostty 1.52×.
+
+The glob matcher used to dominate repositories with long `.gitignore` files. It now picks a strategy per pattern when it compiles it (literal, base name, suffix, prefix, a pattern within the last component, general), converts a path to characters once per query and only when a general pattern needs it, and the ignore matcher looks whole-path, base-name and extension rules up in maps. Median of 5 warm runs, `--include-tests`:
+
+| Repository | km | km2 before | km2 now |
+|---|---|---|---|
+| microsoft/vcpkg | 992 ms | 5,750 ms (5.80×) | 1,867 ms (1.88×) |
+| files-community/Files | 278 ms | 1,899 ms (6.82×) | 436 ms (1.57×) |
+| microsoft/vscode-dev-containers | 201 ms | 1,009 ms (5.01×) | 259 ms (1.28×) |
+| dotnet/fsharp | 2,041 ms | 6,899 ms (3.38×) | 2,118 ms (1.04×) |
+| metabase/metabase | 5,802 ms | 17,053 ms (2.94×) | 6,001 ms (1.03×) |
+
+What remains on vcpkg is outside the matcher: opening files, the lexer, directory listing, and a second read of every file whose name does not tell its language (once for the shebang, once to count it).
+
+## `loc`, complete, on kaikai 0.198.0 (superseded)
 
 kaikai 0.198.0 and ahu 0.5.0. Inputs: `kimun` at `ef36c30`, `kaikai` at `0990eea3e`, `minerva` at `e71a58c`. Same session, median of 10 runs after 2 warm-ups; peak RSS from `/usr/bin/time -l`. "km2 before" is the 0.197.0 source built with 0.198.0; "km2 now" adds the canonical root and the registry as a plain `const`.
 
