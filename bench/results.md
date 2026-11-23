@@ -4,7 +4,22 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `loc`, complete, on kaikai 0.197.0 (current)
+## `loc`, complete, on kaikai 0.198.0 (current)
+
+kaikai 0.198.0 and ahu 0.5.0. Inputs: `kimun` at `ef36c30`, `kaikai` at `0990eea3e`, `minerva` at `e71a58c`. Same session, median of 10 runs after 2 warm-ups; peak RSS from `/usr/bin/time -l`. "km2 before" is the 0.197.0 source built with 0.198.0; "km2 now" adds the canonical root and the registry as a plain `const`.
+
+| Input | km time | km2 before | km2 now | ratio | km RSS | km2 RSS |
+|---|---|---|---|---|---|---|
+| `kimun/src` | 82.1 ms | 117.8 ms | 117.8 ms | 1.43× | 12.5 MB | 7.4 MB |
+| `kimun/src`, `--include-tests` | 106.0 ms | 104.7 ms | 106.0 ms | 1.00× | 11.0 MB | 6.8 MB |
+| kaikai stdlib | 32.2 ms | 31.7 ms | 33.5 ms | 1.04× | 10.9 MB | 6.6 MB |
+| `minerva` | 45.9 ms | 52.6 ms | 50.8 ms | 1.11× | 11.5 MB | 7.8 MB |
+| `kaikai` repository | 698.1 ms | 918.8 ms | 919.8 ms | 1.32× | 12.4 MB | 38.0 MB |
+| `kimun` repository | 97.3 ms | 130.6 ms | 128.0 ms | 1.32× | 12.5 MB | 8.0 MB |
+
+Within the 1.5× time budget on every input, and below km's memory on all but the `kaikai` repository, whose 38 MB peak (3.1×) is the one number out of budget. The gain is the compiler's: the same source went from 2.0×–2.5× on 0.197.0 to 1.0×–1.4× on 0.198.0, with field reads by slot (lnds/kaikai#3504), scalar-replaced records and unboxed `Int` fields (#3505, #3506), `Option` on the native backend (#3507), `math.bits` as instructions (#3522) and a computed `const` evaluated once (#3524). Dropping the registry's per-entry thunk, a concession to #3524 and #3525, costs nothing measurable now.
+
+## `loc`, complete, on kaikai 0.197.0 (superseded)
 
 kaikai 0.197.0 and ahu 0.4.0. The walk now prunes: it reads each directory with `dir.list_entries` (lnds/kaikai#3511) and does not open a directory that `.gitignore`, `.git`, `--exclude-dir` or test exclusion leaves out. Output is km's on every case of `tests/diff/loc.args`, as before.
 

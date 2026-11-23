@@ -8,7 +8,7 @@ Estado: `loc` está portado, con todas las opciones y formatos de `km loc`. Los 
 
 ## Compilación
 
-Requiere kaikai 0.197.0 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`.
+Requiere kaikai 0.198.0 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`.
 
 ```sh
 make build   # ./km2
@@ -33,7 +33,6 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 | Una línea con solo espacios no ASCII (U+00A0, U+3000), `\v` o `\f` | en blanco | código | lnds/kaikai#3512 |
 | Un directorio que no se puede leer | avisa, con el código de error del sistema | avisa, sin el código | lnds/kaikai#3535 |
 | Un archivo que no se puede leer | `<ruta>: Permission denied (os error 13)` | `<ruta>: read_file: cannot open file` | lnds/kaikai#3535 |
-| Una raíz a la que se llega por un enlace simbólico o por `..` | se resuelve a su ruta real | se resuelve por nombre | lnds/kaikai#3516 |
-| Un valor de opción fuera de su conjunto, u opciones en conflicto | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#42 |
-| `--version` | una línea | la línea y otra vacía | kaikailang-org/ahu#41 |
+| Un elemento desconocido en un `--kind` separado por comas (`code,nope`) | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#45 |
+| Redacción de un error de uso | la de clap, con una línea de uso | la de ahu, en una línea | ninguna: ahu redacta sus propios mensajes; el código de salida es el de km |
 | `--by-author` sin el programa `git` | recurre a libgit2 | necesita `git` | ninguna: kaikai no tiene binding de libgit2 |

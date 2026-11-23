@@ -8,7 +8,7 @@ Status: `loc` is ported, with every `km loc` flag and format. The other commands
 
 ## Building
 
-Requires kaikai 0.197.0 (`.kaikai-version`), `km` and `jq` for the quality gate, and `git` for `loc --by-author`.
+Requires kaikai 0.198.0 (`.kaikai-version`), `km` and `jq` for the quality gate, and `git` for `loc --by-author`.
 
 ```sh
 make build   # ./km2
@@ -33,7 +33,6 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 | A line holding only non-ASCII whitespace (U+00A0, U+3000), `\v` or `\f` | blank | code | lnds/kaikai#3512 |
 | A directory that cannot be read | warned about, with the OS error code | warned about, without the code | lnds/kaikai#3535 |
 | A file that cannot be read | `<path>: Permission denied (os error 13)` | `<path>: read_file: cannot open file` | lnds/kaikai#3535 |
-| A root reached through a symlink or `..` | resolved to its real path | resolved by name | lnds/kaikai#3516 |
-| An option value outside its set, or conflicting flags | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#42 |
-| `--version` | one line | the line, then an empty one | kaikailang-org/ahu#41 |
+| An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |
+| Wording of a usage error | clap's, with a usage line | ahu's, on one line | none: ahu words its own messages; the exit code is km's |
 | `--by-author` without the `git` program | falls back to libgit2 | needs `git` | none: kaikai has no libgit2 binding |
