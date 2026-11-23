@@ -48,3 +48,14 @@ test "invalid globs carry km's messages" {
   assert err("a\\") == "error parsing glob 'a\\': dangling '\\'"
   assert err("[z-a]") == "error parsing glob '[z-a]': invalid range; 'z' > 'a'"
 }
+
+test "a double star right after another spans nothing more" {
+  assert ms("**/**/*", "a")
+  assert ms("**/**/*", "a/b/c")
+  assert ms("a/**/**/b", "a/x/y/b")
+}
+
+test "a lone double star matches every path" {
+  assert ms("**", "a")
+  assert ms("**", "a/b/c")
+}

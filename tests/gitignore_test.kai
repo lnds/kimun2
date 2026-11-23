@@ -35,3 +35,10 @@ test "a trailing double star matches inside a directory, not the directory" {
   assert v("gen/**\n", "./repo/gen/a.rs", false) == Ignored
   assert v("gen/**\n", "./repo/gen", true) == Unmatched
 }
+
+test "ignore everything, then re-include every directory" {
+  let text = "*\n!**/\n!*.*\n"
+  assert v(text, "./repo/a/b", true) == Whitelisted
+  assert v(text, "./repo/a/b/x.py", false) == Whitelisted
+  assert v(text, "./repo/a/b/noext", false) == Ignored
+}

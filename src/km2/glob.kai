@@ -50,19 +50,36 @@ fn class_with(pattern: String, negated: Bool, cs: [Char]) : Result[(GlobToken, [
 }
 
 # `**` is recursive only next to separators or the pattern's ends;
-# elsewhere it is a `*`.
-fn double_star(acc: [GlobToken], rest: [Char]) : (GlobToken, [GlobToken], [Char]) {
+# elsewhere it is a `*`. A `**/` right after another spans nothing more
+# and is dropped.
+fn double_star(acc: [GlobToken], rest: [Char]) : (Option[GlobToken], [GlobToken], [Char]) {
   let after_sep = match acc {
     [GLit('/'), ..._] -> true
     _ -> false
   }
+  let after_recursive = match acc {
+    [GRecPrefix, ..._] -> true
+    [GRecMid, ..._] -> true
+    _ -> false
+  }
   match rest {
+    ['/', ...more] if after_recursive -> (None, acc, more)
+    _ -> {
+      let (token, before, after) = recursive(acc, rest, after_sep)
+      (Some(token), before, after)
+    }
+  }
+}
+
+fn recursive(acc: [GlobToken], rest: [Char], after_sep: Bool) : (GlobToken, [GlobToken], [Char]) =
+  match rest {
+    # A lone `**` matches every path: any directories, then one name.
+    [] if acc == [] -> (GStar, [GRecPrefix], rest)
     ['/', ...more] if acc == [] -> (GRecPrefix, acc, more)
     ['/', ...more] if after_sep -> (GRecMid, list.drop(acc, 1), more)
     [] if after_sep -> (GRecSuffix, list.drop(acc, 1), rest)
     _ -> (GStar, acc, rest)
   }
-}
 
 fn alternatives(pattern: String, cs: [Char], acc: [[GlobToken]]) : Result[
   (GlobToken, [Char]),
@@ -86,7 +103,11 @@ fn sequence(pattern: String, cs: [Char], acc: [GlobToken], in_alt: Bool) : Resul
     ['?', ...rest] -> sequence(pattern, rest, [GAny, ...acc], in_alt)
     ['*', '*', ...rest] -> {
       let (token, before, after) = double_star(acc, rest)
-      sequence(pattern, after, [token, ...before], in_alt)
+      let kept = match token {
+        Some(t) -> [t, ...before]
+        None -> before
+      }
+      sequence(pattern, after, kept, in_alt)
     }
     ['*', ...rest] -> sequence(pattern, rest, [GStar, ...acc], in_alt)
     ['[', ...rest] -> {
