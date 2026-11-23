@@ -85,3 +85,12 @@ test "a pattern within the last component" {
   assert ms("**/reviews*", "a/reviews-2024")
   assert not ms("**/reviews*", "reviews/x")
 }
+
+test "the literal a pattern requires rejects a path without it" {
+  assert ms("**/[Tt]est[Rr]esult*", "a/TestResults")
+  assert not ms("**/[Tt]est[Rr]esult*", "a/TestOutput")
+  assert ms("**/packages/*", "a/packages/b")
+  assert not ms("**/packages/*", "a/package/b")
+  assert ms("DocProject/Help/*.HxT", "DocProject/Help/a.HxT")
+  assert not ms("DocProject/Help/*.HxT", "DocProject/a.HxT")
+}

@@ -4,7 +4,22 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `loc` over the language corpus, after the glob strategies (current)
+## `loc` over the language corpus, with a required-literal prefilter (current)
+
+`tools/corpus.sh run`, as below. Output equals km's on 81 repositories; the other 3 are lnds/kaikai#3512.
+
+Total: km 109.9 s, km2 114.5 s, 1.04×. 35 repositories at or below km's time, 45 between 1× and 1.5×, 1 above: microsoft/vcpkg, 1.58× in that single run.
+
+On vcpkg the gap was the walk, not the counting: `--include-ext zzz` (the walk and the ignore rules, nothing counted) took km2 0.83 s against km's 0.12 s. Two changes close most of it. A glob keeps the longest literal run every match contains and rejects a path without it through `string.contains` before backtracking; a query computes a path's last component once, instead of once per pattern through `string.last_index_of`, which the stdlib runs as a kaikai loop. Median of 3 warm runs:
+
+| vcpkg, `--include-tests` | km2 before | km2 now | km |
+|---|---|---|---|
+| walk only (`--include-ext zzz`) | 0.83 s | 0.38 s | 0.12 s |
+| `loc` | 1.92 s | 1.49 s | 0.98 s |
+
+What remains of the walk is spread out: listing directories (`dir.list_entries`, about a quarter), allocation and the ignore stack. Reading only a file's first line to look for a shebang, as km does, was tried and gained nothing: the second read of those files is not a measurable cost.
+
+## `loc` over the language corpus, after the glob strategies (superseded)
 
 `tools/corpus.sh run` over the 84 repositories of `tests/corpus/repos.tsv` (`loc --include-tests --format json`, one warm run each, a rough guide). Output equals km's on 81; the other 3 are lnds/kaikai#3512.
 
@@ -20,7 +35,7 @@ The glob matcher used to dominate repositories with long `.gitignore` files. It 
 | dotnet/fsharp | 2,041 ms | 6,899 ms (3.38×) | 2,118 ms (1.04×) |
 | metabase/metabase | 5,802 ms | 17,053 ms (2.94×) | 6,001 ms (1.03×) |
 
-What remains on vcpkg is outside the matcher: opening files, the lexer, directory listing, and a second read of every file whose name does not tell its language (once for the shebang, once to count it).
+What remained on vcpkg is in the section above.
 
 ## `loc`, complete, on kaikai 0.198.0 (superseded)
 

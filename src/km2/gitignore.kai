@@ -152,14 +152,12 @@ fn keyed(m: Map[String, [Indexed]], k: Option[String]) : [Indexed] = match k {
 # The latest rule that matches: the keyed ones match by their key; the
 # others, last first, are tested until one matches.
 fn decide(m: Matcher, path: String, is_dir: Bool) : Option[Indexed] {
-  let cs = if m.general { string.chars(path) } else { [] }
-  let other = list.find(
-    m.others,
-    i => applies(i, is_dir) and glob.matches_chars(i.rule.pattern, path, cs)
-  )
+  let s = glob.subject(path, m.general)
+  let other =
+    list.find(m.others, i => applies(i, is_dir) and glob.matches_subject(i.rule.pattern, s))
   let from_keys = keyed(m.whole, Some(path))
-    ++ keyed(m.last, Some(glob.base_name(path)))
-    ++ keyed(m.extensions, glob.extension(path))
+    ++ keyed(m.last, Some(s.name))
+    ++ keyed(m.extensions, glob.extension(s.name))
   latest(other, from_keys, is_dir)
 }
 

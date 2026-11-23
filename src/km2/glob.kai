@@ -26,7 +26,12 @@ type Strategy
   | General
 
 #[doc("A compiled glob: its tokens, whether `*` and `?` stop at `/`, and how it is tested.")]
-pub type Glob = { tokens: [GlobToken], literal_separator: Bool, priv strategy: Strategy }
+pub type Glob = {
+  tokens: [GlobToken],
+  literal_separator: Bool,
+  priv strategy: Strategy,
+  priv needle: String
+}
 
 type Parsed = { tokens: [GlobToken], rest: [Char] }
 
@@ -137,8 +142,20 @@ pub fn compile(pattern: String, literal_separator: Bool) : Result[Glob, String] 
   Ok(Glob {
     tokens: p.tokens,
     literal_separator: literal_separator,
-    strategy: strategy(p.tokens, literal_separator)
+    strategy: strategy(p.tokens, literal_separator),
+    needle: needle(p.tokens, [], [])
   })
+}
+
+# The longest run of literal characters every match contains, so a path
+# without it is rejected before the matcher runs.
+fn needle(tokens: [GlobToken], run: [Char], best: [Char]) : String {
+  let longer = if list.length(run) > list.length(best) { run } else { best }
+  match tokens {
+    [] -> string.from_chars(list.reverse(longer))
+    [GLit(c), ...rest] -> needle(rest, [c, ...run], best)
+    [_, ...rest] -> needle(rest, [], longer)
+  }
 }
 
 # The characters of a run of literal tokens, if every token is one.
@@ -265,16 +282,27 @@ pub fn extension(path: String) : Option[String] {
 #[doc("Whether a glob needs a path's characters to be tested; most do not.")]
 pub fn is_general(g: Glob) : Bool = g.strategy == General
 
-#[doc("Whether a glob matches the whole of `path`, whose characters are `cs` when the glob is general.")]
-pub fn matches_chars(g: Glob, path: String, cs: [Char]) : Bool = match g.strategy {
-  Exact(lit) -> path == lit
-  BaseName(lit) -> path == lit or string.ends_with(path, "/" ++ lit)
-  Suffix(lit) -> string.ends_with(path, lit)
-  Prefix(lit) -> string.starts_with(path, lit ++ "/")
-  InBaseName(tokens) -> walk(true, tokens, string.chars(base_name(path)))
-  General -> walk(g.literal_separator, g.tokens, cs)
+#[doc("A path as globs test it: whole, its last component, and its characters when a general glob needs them.")]
+pub type Subject = { path: String, name: String, chars: [Char] }
+
+#[doc("The subject for `path`; `general` says whether some glob will need its characters.")]
+pub fn subject(path: String, general: Bool) : Subject =
+  Subject {
+    path: path,
+    name: base_name(path),
+    chars: if general { string.chars(path) } else { [] }
+  }
+
+#[doc("Whether a glob matches the whole of a subject's path.")]
+pub fn matches_subject(g: Glob, s: Subject) : Bool = match g.strategy {
+  Exact(lit) -> s.path == lit
+  BaseName(lit) -> s.name == lit
+  Suffix(lit) -> string.ends_with(s.path, lit)
+  Prefix(lit) -> string.starts_with(s.path, lit ++ "/")
+  InBaseName(tokens) ->
+    string.contains(s.name, g.needle) and walk(true, tokens, string.chars(s.name))
+  General -> string.contains(s.path, g.needle) and walk(g.literal_separator, g.tokens, s.chars)
 }
 
 #[doc("Whether a glob matches the whole of `path`.")]
-pub fn matches(g: Glob, path: String) : Bool =
-  matches_chars(g, path, if is_general(g) { string.chars(path) } else { [] })
+pub fn matches(g: Glob, path: String) : Bool = matches_subject(g, subject(path, is_general(g)))
