@@ -3,7 +3,6 @@
 
 import encoding.utf8
 import km2.languages.spec
-import km2.languages.spec.{Language}
 import km2.languages.registry.{LANGUAGES}
 
 #[doc("How a language writes comments and literals.")]
@@ -29,10 +28,8 @@ pub fn by_name(path: String) : Option[Spec] {
     |> option.and_then(ext => list.find(known, l => list.contains(l.extensions, ext))))
   let found =
     list.find(known, l => list.contains(l.filenames, name)) |> option.or_else(by_extension)
-  found |> option.map(built)
+  found |> option.map(.spec)
 }
-
-fn built(l: Language) : Spec = l.spec()
 
 const CPP_ONLY : [String] = [
   "namespace ",
@@ -53,7 +50,7 @@ fn is_cpp_line(line: String) : Bool {
 }
 
 fn named(name: String) : Option[Spec] =
-  list.find(LANGUAGES, l => l.name == name) |> option.map(built)
+  list.find(LANGUAGES, l => l.name == name) |> option.map(.spec)
 
 #[doc("The language of a file once its text is known: a C header, valid UTF-8, whose text only C++ writes is C++.")]
 pub fn refine(path: String, s: Spec, src: String) : Spec =
@@ -92,7 +89,7 @@ pub fn by_shebang(first_line: String) : Option[Spec] {
   if string.starts_with(line, "#!") {
     let prog = program(line)
     list.find(LANGUAGES, l => list.any(l.shebangs, sh => string.starts_with(prog, sh)))
-      |> option.map(built)
+      |> option.map(.spec)
   } else {
     None
   }

@@ -20,7 +20,7 @@ pub fn known_by(
     extensions: extensions,
     filenames: filenames,
     shebangs: shebangs,
-    spec: () => syntax(Spec { ...PLAIN, name: name })
+    spec: syntax(Spec { ...PLAIN, name: name })
   }
 
 #[doc("Files of the language hold data or prose, not code.")]

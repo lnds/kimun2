@@ -106,11 +106,11 @@ pub const PLAIN : Spec = Spec {
   dollar_hash: false
 }
 
-#[doc("How a file is recognized as written in a language, and the language's spec, built when a file needs it.")]
+#[doc("How a file is recognized as written in a language, and the language's spec.")]
 pub type Language = {
   name: String,
   extensions: [String],
   filenames: [String],
   shebangs: [String],
-  spec: () -> Spec
+  spec: Spec
 }
