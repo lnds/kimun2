@@ -19,6 +19,7 @@ import km2.selection
 import km2.selection.{Filter}
 import km2.sources
 import km2.sources.{Source}
+import km2.walk.{Unreadable}
 
 const FNV_OFFSET : Int = -3750763034362895579
 
@@ -53,7 +54,7 @@ fn count(t: Tally, s: Source) : Tally / File + Stderr {
   let counted = Tally { ...t, text_files: t.text_files + 1 }
   match file.read(s.path) {
     Err(e) -> {
-      Stderr.eprint("warning: #{s.path}: #{e}\n")
+      Stderr.eprint("warning: #{s.path}: #{e}")
       counted
     }
     Ok(src) -> {
@@ -136,15 +137,25 @@ fn render(o: Options, r: Report, stats: Stats) : Result[String, String] = match 
   _ -> Err(loc_report.CI_FORMAT_ONLY)
 }
 
+#[doc("Warns about a missing root, else about each directory the walk could not read, as km does.")]
+pub fn warn_unreadable(root: String, errors: [Unreadable]) : Unit / File + Stderr =
+  if not file.exists(root) {
+    Stderr.eprint(
+      "warning: #{root}: IO error for operation on #{root}: No such file or directory (os error 2)"
+    )
+  } else {
+    list.each(
+      errors,
+      e => Stderr.eprint("warning: #{e.dir}: IO error for operation on #{e.dir}: #{e.reason}")
+    )
+  }
+
 #[doc("Runs `loc` without `--by-author`: the report in the format asked, or km's error for a CI format.")]
 pub fn run(o: Options) : Result[String, String] / File + Env + Stderr + Clock {
   let start = time.monotonic()
-  if not file.exists(o.root) {
-    Stderr.eprint(
-      "warning: #{o.root}: IO error for operation on #{o.root}: No such file or directory (os error 2)\n"
-    )
-  }
-  let (r, stats) = count_files(sources.files(o.root, o.exclude_tests, o.filter, o.selection))
+  let found = sources.files(o.root, o.exclude_tests, o.filter, o.selection)
+  warn_unreadable(o.root, found.errors)
+  let (r, stats) = count_files(found.sources)
   if r.languages == [] {
     Ok(if o.format == "json" { loc_report.EMPTY_JSON } else { loc_report.NOTHING })
   } else {

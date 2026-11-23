@@ -21,7 +21,7 @@ fn quiet(argv: [String]) : Run = handle {
 test "an unknown command is a usage error naming it" {
   let r = quiet(["cycom"])
   assert r.code == cli.USAGE_ERROR
-  assert r.err == ["error: unknown command `cycom`\n"]
+  assert r.err == ["error: unknown command `cycom`"]
 }
 
 test "no command prints the help on stderr, as km does" {

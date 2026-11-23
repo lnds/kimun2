@@ -12,6 +12,7 @@ import km2.rust_tests
 import km2.selection
 import km2.selection.{Filter}
 import km2.walk
+import km2.walk.{Unreadable}
 
 #[doc("A file to measure: where it is, its language by name or shebang, and its kind.")]
 pub type Source = { path: String, spec: Spec, kind: Kind }
@@ -51,22 +52,27 @@ fn rust_modules(sources: [Source]) : [String] / File {
 #[doc("The Rust files declared as `#[cfg(test)]` modules among the sources.")]
 pub fn test_modules(sources: [Source]) : [String] / File = rust_modules(sources)
 
+#[doc("The source files of a walk, in walk order, and the directories it could not read.")]
+pub type Found = { sources: [Source], errors: [Unreadable] }
+
 #[doc("The source files under `root`, in walk order.")]
 pub fn files(
   root: String,
   exclude_tests: Bool,
   filter: Filter,
   sel: Selection
-) : [Source] / File + Env {
-  let found = walk.files(root, exclude_tests, filter)
+) : Found / File + Env {
+  let walked = walk.files(root, exclude_tests, filter)
+  let found = walked.files
     || (p => match source_of(root, sel, p) {
       Some(s) -> [s]
       None -> []
     })
-  if exclude_tests {
+  let kept = if exclude_tests {
     let modules = rust_modules(found)
     found |? (s => not rust_tests.in_test_module(s.path, modules))
   } else {
     found
   }
+  Found { sources: kept, errors: walked.errors }
 }

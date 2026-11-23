@@ -4,7 +4,32 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `loc`, complete: 64 languages, km's walk and filters (current)
+## `loc`, complete, on kaikai 0.197.0 (current)
+
+kaikai 0.197.0 and ahu 0.4.0. The walk now prunes: it reads each directory with `dir.list_entries` (lnds/kaikai#3511) and does not open a directory that `.gitignore`, `.git`, `--exclude-dir` or test exclusion leaves out. Output is km's on every case of `tests/diff/loc.args`, as before.
+
+| Input | km time | km2 time | ratio | km RSS | km2 RSS |
+|---|---|---|---|---|---|
+| `kimun/src` | 59.8 ms | 137.3 ms | 2.3× | 12.0 MB | 9.0 MB |
+| `kimun/src`, `--include-tests` | 78.0 ms | 157.8 ms | 2.0× | 11.1 MB | 10.5 MB |
+| kaikai stdlib | 23.5 ms | 45.0 ms | 1.9× | 10.9 MB | 6.9 MB |
+| `minerva` | 32.0 ms | 71.7 ms | 2.2× | 11.4 MB | 11.1 MB |
+| `kaikai` repository | 513.3 ms | 1,259.2 ms | 2.5× | 12.5 MB | 51.5 MB |
+| `kimun` repository | 73.6 ms | 152.9 ms | 2.1× | 12.4 MB | 9.6 MB |
+
+Where the change comes from, same session, median of 10 runs (3 for the old walk on `kimun`):
+
+| Input | km2 before, 0.196.3 | km2 before, 0.197.0 | km2 now, 0.197.0 |
+|---|---|---|---|
+| `kimun/src` | 157.0 ms | 140.5 ms | 137.9 ms |
+| kaikai stdlib | 45.1 ms | 46.2 ms | 44.2 ms |
+| `minerva` | 83.5 ms | 78.8 ms | 72.1 ms |
+| `kaikai` repository | 1,673.5 ms | 1,599.5 ms | 1,260.8 ms |
+| `kimun` repository | 3,381.1 ms | 3,254.3 ms | 155.2 ms |
+
+The compiler and stdlib of 0.197.0 (lnds/kaikai#3508's `string.lines` work, #3509) give 3% to 10%; the pruning walk gives the rest: 21× on the `kimun` repository, whose 247,000 files are nearly all in an ignored `target/`, and peak RSS there from 261.6 MB to 9.6 MB. Still out of the 1.5× budget, for the causes below that remain open: the content hash (#3522), the lexer's aggregates (#3505–#3507; #3504 is fixed after 0.197.0) and the language registry (#3524, #3525). lnds/kaikai#3504 is measured again on the release that ships it.
+
+## `loc`, complete: 64 languages, km's walk and filters, on kaikai 0.196.3 (superseded)
 
 Output is byte for byte km's on every case of `tests/diff/loc.args` (`make diff-km`), JSON aside: km2's is compact, km's indented (lnds/kaikai#3521); parsed, they are equal on all eight repositories tried.
 

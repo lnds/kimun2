@@ -8,7 +8,7 @@ Estado: `loc` está portado, con todas las opciones y formatos de `km loc`. Los 
 
 ## Compilación
 
-Requiere kaikai 0.196.3 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`.
+Requiere kaikai 0.197.0 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`.
 
 ```sh
 make build   # ./km2
@@ -31,9 +31,9 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 |---|---|---|---|
 | Formato del JSON | con sangría | compacto (mismo contenido) | lnds/kaikai#3521 |
 | Una línea con solo espacios no ASCII (U+00A0, U+3000), `\v` o `\f` | en blanco | código | lnds/kaikai#3512 |
-| Recorrer un árbol ignorado (`target/`, `node_modules/`) | no se recorre | se lista y luego se filtra: mismo resultado, más lento | lnds/kaikai#3511 |
-| Un directorio que no se puede leer | avisa | se omite en silencio | lnds/kaikai#3511 |
+| Un directorio que no se puede leer | avisa, con el código de error del sistema | avisa, sin el código | lnds/kaikai#3535 |
+| Un archivo que no se puede leer | `<ruta>: Permission denied (os error 13)` | `<ruta>: read_file: cannot open file` | lnds/kaikai#3535 |
 | Una raíz a la que se llega por un enlace simbólico o por `..` | se resuelve a su ruta real | se resuelve por nombre | lnds/kaikai#3516 |
-| Errores de uso (valor inválido, opciones en conflicto) | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#37 |
-| Opción corta de versión | `-V` | `-v` | kaikailang-org/ahu#38 |
+| Un valor de opción fuera de su conjunto, u opciones en conflicto | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#42 |
+| `--version` | una línea | la línea y otra vacía | kaikailang-org/ahu#41 |
 | `--by-author` sin el programa `git` | recurre a libgit2 | necesita `git` | ninguna: kaikai no tiene binding de libgit2 |

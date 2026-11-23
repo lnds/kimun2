@@ -41,9 +41,9 @@ fn compiled(patterns: [String], warn: (String, String) -> String) : [Glob] / Std
       }
     })
 
-fn exclude_warning(p: String, e: String) : String = "warning: invalid glob '#{p}': #{e}\n"
+fn exclude_warning(p: String, e: String) : String = "warning: invalid glob '#{p}': #{e}"
 
-fn kind_warning(p: String, e: String) : String = "warning: invalid glob '#{p}' in [kinds]: #{e}\n"
+fn kind_warning(p: String, e: String) : String = "warning: invalid glob '#{p}' in [kinds]: #{e}"
 
 fn declared(c: Config) : [Declared] / Stderr =
   [(KCode, c.kinds.code), (KDocs, c.kinds.docs), (KInfra, c.kinds.infra), (KData, c.kinds.data)]
@@ -139,10 +139,10 @@ fn reasons(o: Options, modules: [String], p: String) : [String] / File =
     ++ kind_reason(o, p)
 
 fn list_excluded(o: Options) : String / File + Env {
-  let everything = walk.files(o.root, false, selection.EMPTY)
+  let everything = walk.files(o.root, false, selection.EMPTY).files
   let modules = if o.exclude_tests {
     sources.test_modules(
-      sources.files(o.root, false, selection.EMPTY, Selection { chosen: None, declared: [] })
+      sources.files(o.root, false, selection.EMPTY, Selection { chosen: None, declared: [] }).sources
     )
   } else {
     []
@@ -199,7 +199,7 @@ fn blame_file(repo: Repo, root: String, b: Blamed, s: Source) : Blamed / File + 
         let (hunks, fell_back) = git.blame(repo, key)
         if fell_back and (not b.warned) {
           Stderr.eprint(
-            "warning: git blame cannot read .git-blame-ignore-revs; blaming without it\n"
+            "warning: git blame cannot read .git-blame-ignore-revs; blaming without it"
           )
         }
         let seen = set.insert(b.seen, h)
@@ -216,14 +216,16 @@ fn blame_file(repo: Repo, root: String, b: Blamed, s: Source) : Blamed / File + 
   }
 
 const SHALLOW : String =
-  "warning: shallow clone: the history stops at the commits fetched, so commit counts, authors and ages read from it are short (git fetch --unshallow)\n"
+  "warning: shallow clone: the history stops at the commits fetched, so commit counts, authors and ages read from it are short (git fetch --unshallow)"
 
 fn by_author(o: Options) : Result[String, String] / File + Env + Process + Stderr {
   let repo = git.discover(o.root)!
   if git.is_shallow(repo) {
     Stderr.eprint(SHALLOW)
   }
-  let files = sources.files(o.root, o.exclude_tests, o.filter, o.selection)
+  let found = sources.files(o.root, o.exclude_tests, o.filter, o.selection)
+  loc.warn_unreadable(o.root, found.errors)
+  let files = found.sources
   let start = Blamed { owners: %{}, seen: set.empty(), warned: false }
   let blamed = files |> list.foldl(start, (b, s) => blame_file(repo, o.root, b, s))
   let authors = map.to_pairs(blamed.owners)

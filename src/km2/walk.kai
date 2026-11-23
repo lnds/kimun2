@@ -1,9 +1,10 @@
 # The files a command reads under a root, in km's order: depth first, each
 # directory's entries by name byte by byte, with ignore files, `.git`,
-# tests and the user's exclusions applied. The root itself is never
-# filtered.
+# tests and the user's exclusions applied. A directory left out is not
+# read, and the root itself is never filtered.
 
 import fs.dir
+import fs.dir.{DirEntry, EntryDir, EntryFile}
 import fs.file
 import path
 import km2.ignores
@@ -32,74 +33,47 @@ pub fn absolute(p: String) : String / File {
   "/" ++ string.join(normalize(string.split(full, "/"), []), "/")
 }
 
-fn components(root: String, p: String) : [String] =
-  string.split(selection.relative(root, p), "/") |> list.filter(c => c != "")
+#[doc("A directory a walk could not read, and the reason the OS gave.")]
+pub type Unreadable = { dir: String, reason: String }
 
-type Entry = { parts: [String], path: String }
+#[doc("What a walk found: the files it keeps and the directories it could not read, in walk order.")]
+pub type Walked = { files: [String], errors: [Unreadable] }
 
-fn order(a: Entry, b: Entry) : Int =
-  if a.parts < b.parts { -1 } else if b.parts < a.parts { 1 } else { 0 }
+type Walk = { root: String, filter: Filter, exclude_tests: Bool }
 
-# A directory on the way down: where it is, what is in force there, and
-# whether it is left out with everything below it.
-type Level = { parts: [String], stack: Stack, pruned: Bool }
+fn by_name(a: DirEntry, b: DirEntry) : Int =
+  if a.name < b.name { -1 } else if b.name < a.name { 1 } else { 0 }
 
-type Walk = { root: String, filter: Filter, exclude_tests: Bool, levels: [Level], kept: [String] }
-
-fn common(a: [String], b: [String], n: Int) : Int = match (a, b) {
-  ([x, ...xs], [y, ...ys]) if x == y -> common(xs, ys, n + 1)
-  _ -> n
-}
-
-fn dir_path(root: String, parts: [String]) : String = if root == "." {
-  "./" ++ string.join(parts, "/")
-} else {
-  root ++ "/" ++ string.join(parts, "/")
-}
-
-fn descend(w: Walk, parent: Level, name: String) : Level / File {
-  let parts = parent.parts ++ [name]
-  let p = dir_path(w.root, parts)
-  let pruned = parent.pruned
-    or selection.excludes_dir(w.filter, w.exclude_tests, name)
-    or ignores.ignored(parent.stack, p, true)
-  Level {
-    parts: parts,
-    stack: if pruned { parent.stack } else { ignores.enter(parent.stack, p) },
-    pruned: pruned
+fn visit_dir(w: Walk, d: String, stack: Stack, acc: Walked) : Walked / File =
+  match dir.list_entries(d) {
+    Err(e) -> {
+      let reason = string.drop_prefix(e, d ++ ": ") ?? e
+      Walked { ...acc, errors: [Unreadable { dir: d, reason: reason }, ...acc.errors] }
+    }
+    Ok(entries) ->
+      list.sort_by(entries, by_name) |> list.foldl(acc, (a, e) => visit(w, d, stack, a, e))
   }
-}
 
-fn push(w: Walk, levels: [Level], names: [String]) : [Level] / File = match (levels, names) {
-  (_, []) -> levels
-  ([top, ..._], [name, ...rest]) -> push(w, [descend(w, top, name), ...levels], rest)
-  ([], _) -> levels
-}
-
-# The levels for a file's directory: those shared with the previous file
-# kept, the rest entered.
-fn reach(w: Walk, dirs: [String]) : [Level] / File {
-  let depth = list.length(w.levels) - 1
-  let current = match w.levels {
-    [top, ..._] -> top.parts
-    [] -> []
+# Symbolic links and special files are never read.
+fn visit(w: Walk, parent: String, stack: Stack, acc: Walked, e: DirEntry) : Walked / File {
+  let p = parent ++ "/" ++ e.name
+  match e.kind {
+    EntryDir ->
+      if selection.excludes_dir(w.filter, w.exclude_tests, e.name)
+        or ignores.ignored(stack, p, true) {
+        acc
+      } else {
+        visit_dir(w, p, ignores.enter(stack, p), acc)
+      }
+    EntryFile ->
+      if ignores.ignored(stack, p, false)
+        or selection.excludes_file(w.filter, w.root, w.exclude_tests, p) {
+        acc
+      } else {
+        Walked { ...acc, files: [p, ...acc.files] }
+      }
+    _ -> acc
   }
-  let shared = common(current, dirs, 0)
-  let kept = list.drop(w.levels, depth - shared)
-  push(w, kept, list.drop(dirs, shared))
-}
-
-fn visit(w: Walk, e: Entry) : Walk / File {
-  let dirs = list.init(e.parts) ?? []
-  let levels = reach(w, dirs)
-  let here = list.head(levels)
-  let keep = match here {
-    Some(l) -> (not l.pruned)
-      and (not ignores.ignored(l.stack, e.path, false))
-      and (not selection.excludes_file(w.filter, w.root, w.exclude_tests, e.path))
-    None -> false
-  }
-  Walk { ...w, levels: levels, kept: if keep { [e.path, ...w.kept] } else { w.kept } }
 }
 
 fn is_file(p: String) : Bool / File = match file.metadata(p) {
@@ -108,16 +82,13 @@ fn is_file(p: String) : Bool / File = match file.metadata(p) {
 }
 
 #[doc("The files under `root` a command reads, in walk order; a root that is a file is read whatever the filters say.")]
-pub fn files(root: String, exclude_tests: Bool, filter: Filter) : [String] / File + Env {
+pub fn files(root: String, exclude_tests: Bool, filter: Filter) : Walked / File + Env {
   let r = strip_trailing_slash(root)
   if is_file(r) {
-    [r]
+    Walked { files: [r], errors: [] }
   } else {
-    let entries =
-      dir.walk(r) | (p => Entry { parts: components(r, p), path: p }) |> list.sort_by(order)
-    let top = Level { parts: [], stack: ignores.at_root(r, absolute(r)), pruned: false }
-    let start =
-      Walk { root: r, filter: filter, exclude_tests: exclude_tests, levels: [top], kept: [] }
-    list.reverse((entries |> list.foldl(start, visit)).kept)
+    let w = Walk { root: r, filter: filter, exclude_tests: exclude_tests }
+    let found = visit_dir(w, r, ignores.at_root(r, absolute(r)), Walked { files: [], errors: [] })
+    Walked { files: list.reverse(found.files), errors: list.reverse(found.errors) }
   }
 }

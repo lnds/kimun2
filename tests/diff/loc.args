@@ -20,3 +20,5 @@ loc --by-author ../kimun/src/loc
 loc --by-author --format short ../kimun/src
 loc --by-author --format terse ../minerva
 loc --by-author fixtures/empty
+loc /nonexistent/km2-missing
+loc --exclude [ fixtures/lang
