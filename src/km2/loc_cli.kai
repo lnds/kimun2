@@ -74,31 +74,23 @@ fn options(c: cli.Context, cfg: Config) : Result[Options, String] / Stderr {
   let format = cli.text(c, "format") ?? "table"
   let include = cli.texts(c, "include-ext")
   let exclude = cli.texts(c, "exclude-ext")
-  if not list.contains(FORMATS, format) {
-    Err(
-      "invalid value '#{format}' for '--format <FORMAT>' [possible values: table, json, short, terse, github, codeclimate]"
-    )
-  } else if include != [] and exclude != [] {
-    Err("the argument '--include-ext <EXT>' cannot be used with '--exclude-ext <EXT>'")
-  } else {
-    let chosen = chosen_kinds(cli.texts(c, "kind"))!
-    let filter = Filter {
-      include_ext: selection.normalized(include),
-      exclude_ext: selection.normalized(exclude ++ cfg.exclude_extensions),
-      exclude_dirs: cli.texts(c, "exclude-dir") ++ cfg.exclude_dirs,
-      globs: compiled(cli.texts(c, "exclude") ++ cfg.exclude_patterns, exclude_warning)
-    }
-    Ok(Options {
-      root: cli.argument(c, "PATH") ?? ".",
-      format: format,
-      exclude_tests: not cli.boolean(c, "include-tests"),
-      filter: filter,
-      selection: Selection { chosen: chosen, declared: declared(cfg) },
-      verbose: cli.boolean(c, "verbose"),
-      list_excluded: cli.boolean(c, "list-excluded"),
-      by_author: cli.boolean(c, "by-author")
-    })
+  let chosen = chosen_kinds(cli.texts(c, "kind"))!
+  let filter = Filter {
+    include_ext: selection.normalized(include),
+    exclude_ext: selection.normalized(exclude ++ cfg.exclude_extensions),
+    exclude_dirs: cli.texts(c, "exclude-dir") ++ cfg.exclude_dirs,
+    globs: compiled(cli.texts(c, "exclude") ++ cfg.exclude_patterns, exclude_warning)
   }
+  Ok(Options {
+    root: cli.argument(c, "PATH") ?? ".",
+    format: format,
+    exclude_tests: not cli.boolean(c, "include-tests"),
+    filter: filter,
+    selection: Selection { chosen: chosen, declared: declared(cfg) },
+    verbose: cli.boolean(c, "verbose"),
+    list_excluded: cli.boolean(c, "list-excluded"),
+    by_author: cli.boolean(c, "by-author")
+  })
 }
 
 # `--list-excluded`: the files the filters leave out, each with its reasons.
@@ -270,10 +262,11 @@ pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
     |> cli.with_option(
       cli.text_option_with_default(
         "format",
-        "Output format: table, json, short, terse, github, or codeclimate",
+        "Output format",
         "table"
       )
         |> cli.value_name("FORMAT")
+        |> cli.choices(FORMATS)
     )
     |> cli.with_option(
       cli.boolean_option(
@@ -287,6 +280,7 @@ pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
         "Only include files with these extensions (case-insensitive, leading dot optional). Repeatable"
       )
         |> cli.value_name("EXT")
+        |> cli.conflicts_with("exclude-ext")
     )
     |> cli.with_option(
       cli.text_list_option(

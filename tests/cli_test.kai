@@ -36,3 +36,9 @@ test "--version prints the version" {
   assert r.code == 0
   assert r.out == ["km2 #{cli.VERSION}"]
 }
+
+test "a format outside the list and conflicting extension flags are usage errors" {
+  assert quiet(["loc", "--format", "nope", "fixtures/empty"]).code == cli.USAGE_ERROR
+  assert quiet(["loc", "--include-ext", "rs", "--exclude-ext", "md", "fixtures/empty"]).code
+    == cli.USAGE_ERROR
+}
