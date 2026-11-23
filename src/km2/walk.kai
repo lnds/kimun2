@@ -6,7 +6,6 @@
 import fs.dir
 import fs.dir.{DirEntry, EntryDir, EntryFile}
 import fs.file
-import path
 import km2.ignores
 import km2.ignores.{Stack}
 import km2.selection
@@ -19,19 +18,9 @@ fn strip_trailing_slash(p: String) : String =
     p
   }
 
-fn normalize(parts: [String], acc: [String]) : [String] = match parts {
-  [] -> list.reverse(acc)
-  ["", ...rest] -> normalize(rest, acc)
-  [".", ...rest] -> normalize(rest, acc)
-  ["..", ...rest] -> normalize(rest, list.drop(acc, 1))
-  [p, ...rest] -> normalize(rest, [p, ...acc])
-}
-
-#[doc("A path made absolute against the working directory, with `.` and `..` resolved by name.")]
-pub fn absolute(p: String) : String / File {
-  let full = if path.is_absolute(p) { p } else { path.join(ok(dir.current()) ?? "/", p) }
-  "/" ++ string.join(normalize(string.split(full, "/"), []), "/")
-}
+# The root's real path, through symbolic links and `..`, where ancestors'
+# ignore files are looked up.
+fn real(root: String) : String / File = ok(file.canonicalize(root)) ?? root
 
 #[doc("A directory a walk could not read, and the reason the OS gave.")]
 pub type Unreadable = { dir: String, reason: String }
@@ -88,7 +77,7 @@ pub fn files(root: String, exclude_tests: Bool, filter: Filter) : Walked / File 
     Walked { files: [r], errors: [] }
   } else {
     let w = Walk { root: r, filter: filter, exclude_tests: exclude_tests }
-    let found = visit_dir(w, r, ignores.at_root(r, absolute(r)), Walked { files: [], errors: [] })
+    let found = visit_dir(w, r, ignores.at_root(r, real(r)), Walked { files: [], errors: [] })
     Walked { files: list.reverse(found.files), errors: list.reverse(found.errors) }
   }
 }
