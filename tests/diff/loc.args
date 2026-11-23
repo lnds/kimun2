@@ -24,4 +24,5 @@ loc /nonexistent/km2-missing
 loc --exclude [ fixtures/lang
 loc fixtures/linked/via
 loc fixtures/linked/real/sub/../sub
+loc --include-tests fixtures/lang
 loc --include-tests fixtures/reinclude

@@ -14,7 +14,10 @@ Requires kaikai 0.198.0 (`.kaikai-version`), `km` and `jq` for the quality gate,
 make build   # ./km2
 make test
 make ci      # format, lint, build, tests, quality gate with km and km2, differential tests against km
+make corpus  # the language corpus: fetch and compare with km (network, several GB)
 ```
+
+The language corpus, `tests/corpus/repos.tsv`, lists two real repositories per language, each pinned by commit. `tools/corpus.sh` clones them into `~/.cache/km2-corpus` (`$KM2_CORPUS`), compares `loc` on each with km, and with `files OWNER/REPO` narrows a difference down to the file.
 
 ## km vs km2
 
@@ -30,9 +33,7 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 | Behaviour | km | km2 | Upstream |
 |---|---|---|---|
 | JSON layout | indented | compact (same content) | lnds/kaikai#3521 |
-| A line holding only non-ASCII whitespace (U+00A0, U+3000), `\v` or `\f` | blank | code | lnds/kaikai#3512 |
+| A line holding only non-ASCII whitespace (U+00A0, U+0085, U+3000), `\v` or `\f` | blank | code | lnds/kaikai#3512 |
 | A directory that cannot be read | warned about, with the OS error code | warned about, without the code | lnds/kaikai#3535 |
 | A file that cannot be read | `<path>: Permission denied (os error 13)` | `<path>: read_file: cannot open file` | lnds/kaikai#3535 |
 | An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |
-| Wording of a usage error | clap's, with a usage line | ahu's, on one line | none: ahu words its own messages; the exit code is km's |
-| `--by-author` without the `git` program | falls back to libgit2 | needs `git` | none: kaikai has no libgit2 binding |

@@ -5,7 +5,7 @@
 #   tools/diff-km.sh [--km2 PATH] <args...>          whole output
 #   tools/diff-km.sh [--km2 PATH] --files <dir> [<loc args...>]
 #                                                    `loc --format json` per file,
-#                                                    listing the files that differ
+#                                                    parsed, listing the files that differ
 #
 # Exit status: 0 when every output matches, 1 otherwise.
 set -u
@@ -26,8 +26,8 @@ dir=$2
 shift 2
 status=0
 while IFS= read -r -d '' f; do
-  a=$(km loc --include-tests --format json "$@" "$f" 2>&1)
-  b=$("$KM2" loc --include-tests --format json "$@" "$f" 2>&1)
+  a=$(km loc --include-tests --format json "$@" "$f" 2>&1 | jq -S . 2>&1)
+  b=$("$KM2" loc --include-tests --format json "$@" "$f" 2>&1 | jq -S . 2>&1)
   if [ "$a" != "$b" ]; then
     echo "DIFF $f"
     status=1

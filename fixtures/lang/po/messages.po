@@ -1,0 +1,9 @@
+# Translation file.
+#, fuzzy
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#: src/main.c:10
+msgid "Hello # world"
+msgstr "Hola # mundo"

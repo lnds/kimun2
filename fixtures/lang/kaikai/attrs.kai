@@ -1,0 +1,17 @@
+# A comment.
+
+#[doc("""
+Documentation that is
+comment, blank lines included.
+
+""")]
+pub fn f(x: Int) : Int = x + 1
+
+#[derive(Show)]
+type T = { s: String }
+
+fn g() : String = "# not a comment"
+
+fn h() : String = """
+# inside a triple-quoted string
+"""

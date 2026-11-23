@@ -7,7 +7,7 @@ KM2 := ./km2
 
 KAI_VERSION := $(shell cat .kaikai-version)
 
-.PHONY: build test fmt fmt-check lint toolchain gate-km gate-km2 gate diff-km ci
+.PHONY: build test fmt fmt-check lint toolchain gate-km gate-km2 gate diff-km corpus ci
 
 toolchain:
 	@$(KAI) --version | grep -q " $(KAI_VERSION) " || \
@@ -39,8 +39,17 @@ gate-km2: build
 gate: gate-km gate-km2
 
 # Differential tests: km and km2 on the same arguments, output compared
-# byte for byte (tests/diff/*.args, one argument set per line).
+# byte for byte (tests/diff/*.args, one argument set per line), then each
+# file of the language fixtures on its own.
 diff-km: build
 	@cat tests/diff/*.args | bash tools/diff-matrix.sh $(KM2)
+	@bash tools/diff-km.sh --km2 $(KM2) --files fixtures/lang && echo "SAME  loc per file, fixtures/lang"
+
+# The language corpus (tests/corpus/repos.tsv): real repositories, two per
+# language, fetched once and compared with km. Not part of ci: it needs
+# the network and several gigabytes.
+corpus: build
+	@bash tools/corpus.sh --km2 $(KM2) fetch
+	@bash tools/corpus.sh --km2 $(KM2) run
 
 ci: fmt-check lint build test gate diff-km
