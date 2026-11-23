@@ -247,8 +247,13 @@ fn walk(sep: Bool, tokens: [GlobToken], cs: [Char]) : Bool = match tokens {
   }
 }
 
-#[doc("The one string that decides a glob, when there is one: the whole path, its last component, or the extension of its last component.")]
-pub type Key = WholePath(String) | LastComponent(String) | Extension(String) | NoKey
+#[doc("The one string that decides a glob, when there is one: the whole path, its last component, or the extension of its last component; or the extension a path needs before the glob is worth testing.")]
+pub type Key
+  = WholePath(String)
+  | LastComponent(String)
+  | Extension(String)
+  | EndsIn(String)
+  | NoKey
 
 fn extension_of_suffix(lit: String) : Option[String] = match string.drop_prefix(lit, ".") {
   Some(ext) if ext != "" and (not string.contains(ext, ".")) -> Some(ext)
@@ -261,7 +266,7 @@ pub fn key(g: Glob) : Key = match g.strategy {
   BaseName(lit) -> LastComponent(lit)
   Suffix(lit) -> match extension_of_suffix(lit) {
     Some(ext) -> Extension(ext)
-    None -> NoKey
+    None -> (extension(lit) |> option.map(EndsIn)) ?? NoKey
   }
   _ -> NoKey
 }
@@ -279,19 +284,11 @@ pub fn extension(path: String) : Option[String] {
     |> option.map(i => string.slice(name, i + 1, string.byte_length(name) - i - 1))
 }
 
-#[doc("Whether a glob needs a path's characters to be tested; most do not.")]
-pub fn is_general(g: Glob) : Bool = g.strategy == General
+#[doc("A path as globs test it: whole and its last component.")]
+pub type Subject = { path: String, name: String }
 
-#[doc("A path as globs test it: whole, its last component, and its characters when a general glob needs them.")]
-pub type Subject = { path: String, name: String, chars: [Char] }
-
-#[doc("The subject for `path`; `general` says whether some glob will need its characters.")]
-pub fn subject(path: String, general: Bool) : Subject =
-  Subject {
-    path: path,
-    name: base_name(path),
-    chars: if general { string.chars(path) } else { [] }
-  }
+#[doc("The subject for `path`.")]
+pub fn subject(path: String) : Subject = Subject { path: path, name: base_name(path) }
 
 #[doc("Whether a glob matches the whole of a subject's path.")]
 pub fn matches_subject(g: Glob, s: Subject) : Bool = match g.strategy {
@@ -301,8 +298,9 @@ pub fn matches_subject(g: Glob, s: Subject) : Bool = match g.strategy {
   Prefix(lit) -> string.starts_with(s.path, lit ++ "/")
   InBaseName(tokens) ->
     string.contains(s.name, g.needle) and walk(true, tokens, string.chars(s.name))
-  General -> string.contains(s.path, g.needle) and walk(g.literal_separator, g.tokens, s.chars)
+  General ->
+    string.contains(s.path, g.needle) and walk(g.literal_separator, g.tokens, string.chars(s.path))
 }
 
 #[doc("Whether a glob matches the whole of `path`.")]
-pub fn matches(g: Glob, path: String) : Bool = matches_subject(g, subject(path, is_general(g)))
+pub fn matches(g: Glob, path: String) : Bool = matches_subject(g, subject(path))

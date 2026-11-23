@@ -56,8 +56,11 @@ fn absolute_of(s: Stack, p: String) : String {
   }
 }
 
+fn has_rules(f: Frame) : Bool =
+  not (gitignore.is_empty(f.ignore) and gitignore.is_empty(f.git) and gitignore.is_empty(f.exclude))
+
 fn step(s: Stack, p: String, is_dir: Bool, any_git: Bool, seen: Seen, f: Frame) : Seen {
-  let candidate = if f.above { absolute_of(s, p) } else { p }
+  let candidate = if f.above and has_rules(f) { absolute_of(s, p) } else { p }
   let git_open = any_git and (not seen.saw_git)
   Seen {
     ignore: first(seen.ignore, f.ignore, candidate, is_dir),

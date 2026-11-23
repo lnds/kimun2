@@ -51,3 +51,13 @@ test "the latest line decides across names, extensions and general patterns" {
   assert v("*.log\n!debug.log\n", "./repo/a/debug.log", false) == Whitelisted
   assert v("logs/\n!*.log\n", "./repo/logs", true) == Ignored
 }
+
+test "a suffix with a dot is tested only on paths with its extension" {
+  assert v("*_i.c\n", "./repo/a/b_i.c", false) == Ignored
+  assert v("*_i.c\n", "./repo/a/b_i.cc", false) == Unmatched
+  assert v("*_i.c\n", "./repo/a/b.c", false) == Unmatched
+  assert v("*.VC.db\n", "./repo/x.VC.db", false) == Ignored
+  assert v("*.VC.db\n", "./repo/x.db", false) == Unmatched
+  assert v("*.VC.db\n!x.*\n", "./repo/x.VC.db", false) == Whitelisted
+  assert v("!x.*\n*.VC.db\n", "./repo/x.VC.db", false) == Ignored
+}

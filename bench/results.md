@@ -4,6 +4,25 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
+## `loc` over the language corpus, with ignore rules indexed by suffix (current)
+
+`tools/corpus.sh run`, as below (a few repositories ran beside a microbenchmark, which slows km and km2 alike). Output equals km's on 81 repositories; the other 3 are lnds/kaikai#3512.
+
+Total: km 109.2 s, km2 107.9 s, 0.99×. 44 repositories at or below km's time, 37 between 1× and 1.5×, none above; microsoft/vcpkg 1.37×.
+
+The gap on vcpkg is user CPU (km2 0.89 s, km 0.44 s); system time is the same (0.45 s, 0.53 s). Three changes to the ignore matching, median of 3 warm runs:
+
+- a path's characters are built only when a general pattern passed its literal prefilter, not on every query of a matcher holding one;
+- a suffix with a dot (`*_i.c`, `*.VC.db`) is filed under the extension it requires and tested only on paths with that extension, instead of an `ends_with` per path;
+- the frames above the root (its ancestors' ignore files) build a path's absolute form only when they hold rules.
+
+| vcpkg, `--include-tests` | km2 before | km2 now | km |
+|---|---|---|---|
+| walk only (`--include-ext zzz`) | 0.38 s | 0.28 s | 0.12 s |
+| `loc` | 1.49 s | 1.35 s | 0.98 s |
+
+What remains is kaikai's: `dir.list_entries` is a quarter of the walk; `string.last_index_of` (lnds/kaikai#3548) and `starts_with` / `ends_with` (#3553) copy a slice per call; the lexer allocates a record per step; and the per-file line list and FNV hash are kaikai loops. Computing a path's last component once for every frame instead of once per matcher was tried and gained nothing measurable.
+
 ## Peak memory on the `kaikai` repository (current)
 
 The 38 MB peak on the `kaikai` repository was one file: `stage0/runtime.h` (522 KB) took km2 to 35.9 MB on its own. Deciding whether a `.h` header is C or C++ checked that its text is valid UTF-8 first, through `utf8.is_valid(string.bytes(src))`, and `string.bytes` builds a list of one cell per byte (about 48 bytes of heap each, lnds/kaikai#3550). The check now runs only once a line only C++ writes is found; a C header never pays it.
@@ -16,7 +35,7 @@ The 38 MB peak on the `kaikai` repository was one file: `stage0/runtime.h` (522 
 
 A large C++ header still pays the list until #3550 gives a validation over the `String` itself.
 
-## `loc` over the language corpus, with a required-literal prefilter (current)
+## `loc` over the language corpus, with a required-literal prefilter (superseded)
 
 `tools/corpus.sh run`, as below. Output equals km's on 81 repositories; the other 3 are lnds/kaikai#3512.
 

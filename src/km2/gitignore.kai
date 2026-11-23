@@ -3,7 +3,7 @@
 
 import collections.map
 import km2.glob
-import km2.glob.{Glob, WholePath, LastComponent, Extension, NoKey}
+import km2.glob.{Glob, WholePath, LastComponent, Extension, EndsIn, NoKey}
 
 #[doc("One pattern line: its glob, whether `!` re-includes, whether it matches directories only.")]
 pub type Rule = { pattern: Glob, whitelist: Bool, only_dir: Bool }
@@ -17,8 +17,8 @@ pub type Matcher = {
   priv whole: Map[String, [Indexed]],
   priv last: Map[String, [Indexed]],
   priv extensions: Map[String, [Indexed]],
+  priv suffixes: Map[String, [Indexed]],
   priv others: [Indexed],
-  priv general: Bool,
   priv size: Int
 }
 
@@ -32,8 +32,8 @@ pub fn empty(root: String) : Matcher =
     whole: %{},
     last: %{},
     extensions: %{},
+    suffixes: %{},
     others: [],
-    general: false,
     size: 0
   }
 
@@ -44,11 +44,8 @@ fn add(m: Matcher, i: Indexed) : Matcher = match glob.key(i.rule.pattern) {
   WholePath(k) -> Matcher { ...m, whole: file_under(m.whole, k, i) }
   LastComponent(k) -> Matcher { ...m, last: file_under(m.last, k, i) }
   Extension(k) -> Matcher { ...m, extensions: file_under(m.extensions, k, i) }
-  NoKey -> Matcher {
-    ...m,
-    others: [i, ...m.others],
-    general: m.general or glob.is_general(i.rule.pattern)
-  }
+  EndsIn(k) -> Matcher { ...m, suffixes: file_under(m.suffixes, k, i) }
+  NoKey -> Matcher { ...m, others: [i, ...m.others] }
 }
 
 fn has_doublestar_prefix(p: String) : Bool = string.starts_with(p, "**/") or p == "**"
@@ -149,17 +146,24 @@ fn keyed(m: Map[String, [Indexed]], k: Option[String]) : [Indexed] = match k {
   None -> []
 }
 
-# The latest rule that matches: the keyed ones match by their key; the
-# others, last first, are tested until one matches.
+# The latest rule that matches: the keyed ones match by their key, the
+# suffixes filed under the path's extension are tested, and the others,
+# last first, are tested until one matches.
 fn decide(m: Matcher, path: String, is_dir: Bool) : Option[Indexed] {
-  let s = glob.subject(path, m.general)
+  let s = glob.subject(path)
+  let ext = glob.extension(s.name)
   let other =
     list.find(m.others, i => applies(i, is_dir) and glob.matches_subject(i.rule.pattern, s))
+  let suffixed = keyed(m.suffixes, ext) |? (i => glob.matches_subject(i.rule.pattern, s))
   let from_keys = keyed(m.whole, Some(path))
     ++ keyed(m.last, Some(s.name))
-    ++ keyed(m.extensions, glob.extension(s.name))
+    ++ keyed(m.extensions, ext)
+    ++ suffixed
   latest(other, from_keys, is_dir)
 }
+
+#[doc("Whether a matcher has no rules.")]
+pub fn is_empty(m: Matcher) : Bool = m.size == 0
 
 #[doc("The verdict of the last rule that matches `path`; directory-only rules match only directories.")]
 pub fn matched(m: Matcher, path: String, is_dir: Bool) : Verdict =
