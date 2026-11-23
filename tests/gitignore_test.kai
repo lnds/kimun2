@@ -42,3 +42,12 @@ test "ignore everything, then re-include every directory" {
   assert v(text, "./repo/a/b/x.py", false) == Whitelisted
   assert v(text, "./repo/a/b/noext", false) == Ignored
 }
+
+test "the latest line decides across names, extensions and general patterns" {
+  assert v("*.log\nde[b]ug*\n", "./repo/debug.log", false) == Ignored
+  assert v("de[b]ug*\n!*.log\n", "./repo/debug.log", false) == Whitelisted
+  assert v("!*.log\nde[b]ug*\n", "./repo/debug.log", false) == Ignored
+  assert v("!debug.log\n*.log\n", "./repo/a/debug.log", false) == Ignored
+  assert v("*.log\n!debug.log\n", "./repo/a/debug.log", false) == Whitelisted
+  assert v("logs/\n!*.log\n", "./repo/logs", true) == Ignored
+}

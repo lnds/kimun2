@@ -59,3 +59,29 @@ test "a lone double star matches every path" {
   assert ms("**", "a")
   assert ms("**", "a/b/c")
 }
+
+test "literal, base name, suffix and prefix patterns" {
+  assert ms("Cargo.lock", "Cargo.lock")
+  assert not ms("Cargo.lock", "a/Cargo.lock")
+  assert ms("**/node_modules", "node_modules")
+  assert ms("**/node_modules", "a/b/node_modules")
+  assert not ms("**/node_modules", "a/xnode_modules")
+  assert ms("**/*.log", "x.log")
+  assert ms("**/*.log", "a/b/x.log")
+  assert not ms("**/*.log", "a/x.logs")
+  assert ms("src/**", "src/a/b.rs")
+  assert not ms("src/**", "src")
+  assert not ms("src/**", "srcx/a")
+  assert ms("src/**/*", "src/a")
+  assert ms("src/**/*", "src/a/b")
+  assert not ms("src/**/*", "srcx/a")
+  assert m("*.min.js", "a/b.min.js")
+}
+
+test "a pattern within the last component" {
+  assert ms("**/[Dd]ebug", "a/Debug")
+  assert ms("**/[Dd]ebug", "debug")
+  assert not ms("**/[Dd]ebug", "a/Debug/x")
+  assert ms("**/reviews*", "a/reviews-2024")
+  assert not ms("**/reviews*", "reviews/x")
+}

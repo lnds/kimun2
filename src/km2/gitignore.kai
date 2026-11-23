@@ -1,20 +1,55 @@
 # Ignore files (`.gitignore`, `.ignore`, `.git/info/exclude`, the global
 # excludes file), read and matched as the walk km is built on reads them.
 
+import collections.map
 import km2.glob
-import km2.glob.{Glob}
+import km2.glob.{Glob, WholePath, LastComponent, Extension, NoKey}
 
 #[doc("One pattern line: its glob, whether `!` re-includes, whether it matches directories only.")]
 pub type Rule = { pattern: Glob, whitelist: Bool, only_dir: Bool }
 
-#[doc("The rules of one ignore file, matched relative to the directory `root`.")]
-pub type Matcher = { root: String, rules: [Rule] }
+# A rule and its line order: of the rules that match, the latest decides.
+type Indexed = { index: Int, rule: Rule }
+
+#[doc("The rules of one ignore file, matched relative to the directory `root`: those one string decides, by that string, and the rest last first.")]
+pub type Matcher = {
+  root: String,
+  priv whole: Map[String, [Indexed]],
+  priv last: Map[String, [Indexed]],
+  priv extensions: Map[String, [Indexed]],
+  priv others: [Indexed],
+  priv general: Bool,
+  priv size: Int
+}
 
 #[doc("What an ignore file says about a path.")]
 pub type Verdict = Ignored | Whitelisted | Unmatched
 
 #[doc("A matcher with no rules.")]
-pub fn empty(root: String) : Matcher = Matcher { root: root, rules: [] }
+pub fn empty(root: String) : Matcher =
+  Matcher {
+    root: root,
+    whole: %{},
+    last: %{},
+    extensions: %{},
+    others: [],
+    general: false,
+    size: 0
+  }
+
+fn file_under(m: Map[String, [Indexed]], k: String, i: Indexed) : Map[String, [Indexed]] =
+  map.put(m, k, [i, ...map.get(m, k) ?? []])
+
+fn add(m: Matcher, i: Indexed) : Matcher = match glob.key(i.rule.pattern) {
+  WholePath(k) -> Matcher { ...m, whole: file_under(m.whole, k, i) }
+  LastComponent(k) -> Matcher { ...m, last: file_under(m.last, k, i) }
+  Extension(k) -> Matcher { ...m, extensions: file_under(m.extensions, k, i) }
+  NoKey -> Matcher {
+    ...m,
+    others: [i, ...m.others],
+    general: m.general or glob.is_general(i.rule.pattern)
+  }
+}
 
 fn has_doublestar_prefix(p: String) : Bool = string.starts_with(p, "**/") or p == "**"
 
@@ -75,11 +110,11 @@ fn rules_of(line: String) : [Rule] = match rule_of(line) {
 }
 
 #[doc("Reads an ignore file's text; lines that do not compile are skipped, as the walk km uses skips them.")]
-pub fn parse(root: String, text: String) : Matcher =
-  Matcher {
-    root: root,
-    rules: string.lines(text) || (l => rules_of(string.drop_suffix(l, "\r") ?? l))
-  }
+pub fn parse(root: String, text: String) : Matcher {
+  let rules = string.lines(text) || (l => rules_of(string.drop_suffix(l, "\r") ?? l))
+  let indexed = list.map_indexed(rules, (i, r) => Indexed { index: i, rule: r })
+  Matcher { ...indexed |> list.foldl(empty(root), add), size: list.length(rules) }
+}
 
 fn strip_dot_slash(p: String) : String = string.drop_prefix(p, "./") ?? p
 
@@ -97,15 +132,44 @@ fn relative(m: Matcher, path: String) : String {
   }
 }
 
-fn last_match(rules: [Rule], path: String, is_dir: Bool, found: Verdict) : Verdict = match rules {
-  [] -> found
-  [r, ...rest] -> {
-    let applies = ((not r.only_dir) or is_dir) and glob.matches(r.pattern, path)
-    let now = if not applies { found } else if r.whitelist { Whitelisted } else { Ignored }
-    last_match(rest, path, is_dir, now)
-  }
+fn applies(i: Indexed, is_dir: Bool) : Bool = (not i.rule.only_dir) or is_dir
+
+fn latest(found: Option[Indexed], candidates: [Indexed], is_dir: Bool) : Option[Indexed] =
+  candidates
+    |> list.foldl(
+      found,
+      (best, c) => match best {
+        Some(b) if b.index > c.index -> best
+        _ -> if applies(c, is_dir) { Some(c) } else { best }
+      }
+    )
+
+fn keyed(m: Map[String, [Indexed]], k: Option[String]) : [Indexed] = match k {
+  Some(key) -> map.get(m, key) ?? []
+  None -> []
+}
+
+# The latest rule that matches: the keyed ones match by their key; the
+# others, last first, are tested until one matches.
+fn decide(m: Matcher, path: String, is_dir: Bool) : Option[Indexed] {
+  let cs = if m.general { string.chars(path) } else { [] }
+  let other = list.find(
+    m.others,
+    i => applies(i, is_dir) and glob.matches_chars(i.rule.pattern, path, cs)
+  )
+  let from_keys = keyed(m.whole, Some(path))
+    ++ keyed(m.last, Some(glob.base_name(path)))
+    ++ keyed(m.extensions, glob.extension(path))
+  latest(other, from_keys, is_dir)
 }
 
 #[doc("The verdict of the last rule that matches `path`; directory-only rules match only directories.")]
 pub fn matched(m: Matcher, path: String, is_dir: Bool) : Verdict =
-  last_match(m.rules, relative(m, path), is_dir, Unmatched)
+  if m.size == 0 {
+    Unmatched
+  } else {
+    match decide(m, relative(m, path), is_dir) {
+      None -> Unmatched
+      Some(i) -> if i.rule.whitelist { Whitelisted } else { Ignored }
+    }
+  }

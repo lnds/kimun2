@@ -15,8 +15,18 @@ pub type GlobToken
   | GClass(Bool, [(Char, Char)])
   | GAlt([[GlobToken]])
 
-#[doc("A compiled glob: its tokens and whether `*` and `?` stop at `/`.")]
-pub type Glob = { tokens: [GlobToken], literal_separator: Bool }
+# How a glob is tested: most patterns are a literal, a base name, a
+# suffix or a prefix, answered without the general matcher.
+type Strategy
+  = Exact(String)
+  | BaseName(String)
+  | Suffix(String)
+  | Prefix(String)
+  | InBaseName([GlobToken])
+  | General
+
+#[doc("A compiled glob: its tokens, whether `*` and `?` stop at `/`, and how it is tested.")]
+pub type Glob = { tokens: [GlobToken], literal_separator: Bool, priv strategy: Strategy }
 
 type Parsed = { tokens: [GlobToken], rest: [Char] }
 
@@ -124,7 +134,53 @@ fn sequence(pattern: String, cs: [Char], acc: [GlobToken], in_alt: Bool) : Resul
 #[doc("Compiles a glob; `Err` carries km's message for an invalid one.")]
 pub fn compile(pattern: String, literal_separator: Bool) : Result[Glob, String] {
   let p = sequence(pattern, string.chars(pattern), [], false)!
-  Ok(Glob { tokens: p.tokens, literal_separator: literal_separator })
+  Ok(Glob {
+    tokens: p.tokens,
+    literal_separator: literal_separator,
+    strategy: strategy(p.tokens, literal_separator)
+  })
+}
+
+# The characters of a run of literal tokens, if every token is one.
+fn literal(tokens: [GlobToken], acc: [Char]) : Option[String] = match tokens {
+  [] -> Some(string.from_chars(list.reverse(acc)))
+  [GLit(c), ...rest] -> literal(rest, [c, ...acc])
+  _ -> None
+}
+
+fn without_slash(lit: Option[String]) : Option[String] =
+  lit |> option.and_then(l => if string.contains(l, "/") { None } else { Some(l) })
+
+fn prefix_of(tokens: [GlobToken]) : Option[String] = match list.reverse(tokens) {
+  [GRecSuffix, ...before] -> literal(list.reverse(before), [])
+  [GStar, GRecMid, ...before] -> literal(list.reverse(before), [])
+  _ -> None
+}
+
+fn shaped(tokens: [GlobToken]) : Option[Strategy] = match tokens {
+  [GRecPrefix, GStar, ...lits] -> without_slash(literal(lits, [])) |> option.map(Suffix)
+  [GRecPrefix, ...lits] -> without_slash(literal(lits, [])) |> option.map(BaseName)
+  _ -> prefix_of(tokens) |> option.map(Prefix)
+}
+
+# Tokens that match within one path component when `*` and `?` stop at `/`.
+fn within_component(t: GlobToken) : Bool = match t {
+  GLit(c) -> c != '/'
+  GAny -> true
+  GStar -> true
+  GClass(_, _) -> true
+  _ -> false
+}
+
+# `**/` and then one component: only the last component of a path can match.
+fn in_base_name(tokens: [GlobToken], sep: Bool) : Option[Strategy] = match tokens {
+  [GRecPrefix, ...rest] if sep and list.all(rest, within_component) -> Some(InBaseName(rest))
+  _ -> None
+}
+
+fn strategy(tokens: [GlobToken], sep: Bool) : Strategy = match literal(tokens, []) {
+  Some(lit) -> Exact(lit)
+  None -> (shaped(tokens) |> option.or_else(() => in_base_name(tokens, sep))) ?? General
 }
 
 fn in_ranges(c: Char, ranges: [(Char, Char)]) : Bool = match ranges {
@@ -174,6 +230,51 @@ fn walk(sep: Bool, tokens: [GlobToken], cs: [Char]) : Bool = match tokens {
   }
 }
 
+#[doc("The one string that decides a glob, when there is one: the whole path, its last component, or the extension of its last component.")]
+pub type Key = WholePath(String) | LastComponent(String) | Extension(String) | NoKey
+
+fn extension_of_suffix(lit: String) : Option[String] = match string.drop_prefix(lit, ".") {
+  Some(ext) if ext != "" and (not string.contains(ext, ".")) -> Some(ext)
+  _ -> None
+}
+
+#[doc("The key that decides a glob, so a set can look it up instead of testing it.")]
+pub fn key(g: Glob) : Key = match g.strategy {
+  Exact(lit) -> WholePath(lit)
+  BaseName(lit) -> LastComponent(lit)
+  Suffix(lit) -> match extension_of_suffix(lit) {
+    Some(ext) -> Extension(ext)
+    None -> NoKey
+  }
+  _ -> NoKey
+}
+
+#[doc("The last component of a path.")]
+pub fn base_name(path: String) : String = match string.last_index_of(path, "/") {
+  Some(i) -> string.slice(path, i + 1, string.byte_length(path) - i - 1)
+  None -> path
+}
+
+#[doc("The extension of a path's last component: after its last dot, a leading one included.")]
+pub fn extension(path: String) : Option[String] {
+  let name = base_name(path)
+  string.last_index_of(name, ".")
+    |> option.map(i => string.slice(name, i + 1, string.byte_length(name) - i - 1))
+}
+
+#[doc("Whether a glob needs a path's characters to be tested; most do not.")]
+pub fn is_general(g: Glob) : Bool = g.strategy == General
+
+#[doc("Whether a glob matches the whole of `path`, whose characters are `cs` when the glob is general.")]
+pub fn matches_chars(g: Glob, path: String, cs: [Char]) : Bool = match g.strategy {
+  Exact(lit) -> path == lit
+  BaseName(lit) -> path == lit or string.ends_with(path, "/" ++ lit)
+  Suffix(lit) -> string.ends_with(path, lit)
+  Prefix(lit) -> string.starts_with(path, lit ++ "/")
+  InBaseName(tokens) -> walk(true, tokens, string.chars(base_name(path)))
+  General -> walk(g.literal_separator, g.tokens, cs)
+}
+
 #[doc("Whether a glob matches the whole of `path`.")]
 pub fn matches(g: Glob, path: String) : Bool =
-  walk(g.literal_separator, g.tokens, string.chars(path))
+  matches_chars(g, path, if is_general(g) { string.chars(path) } else { [] })
