@@ -34,5 +34,5 @@ test "no command prints the help on stderr, as km does" {
 test "--version prints the version" {
   let r = quiet(["--version"])
   assert r.code == 0
-  assert r.out == ["km2 #{cli.VERSION}\n"]
+  assert r.out == ["km2 #{cli.VERSION}"]
 }

@@ -54,7 +54,7 @@ fixtures/<lang>/    inputs with expected results
 tools/              repo scripts: the quality gate
 ```
 
-`make ci` is everything CI runs: format, lint, build, tests, the quality gate with `km` and with `km2`, and the differential tests against `km`. The kaikai version is pinned in `.kaikai-version` (0.197.0).
+`make ci` is everything CI runs: format, lint, build, tests, the quality gate with `km` and with `km2`, and the differential tests against `km`. The kaikai version is pinned in `.kaikai-version` (0.198.0).
 
 ## Principles
 
