@@ -150,3 +150,15 @@ test "pascal: two block comments, directives, no escapes" {
   assert counts("a.dpr", "{$mode objfpc}{$H+}\n{ comment }\n// another\n") == ((0, 2, 1))
   assert counts("a.pas", "WriteLn('{ not a comment');\nX := 1;\n") == ((0, 0, 2))
 }
+
+fn header(src: String) : String = match languages.detect("a.h", src) {
+  Some(spec) -> spec.name
+  None -> ""
+}
+
+test "a header is C++ when a line only C++ writes is in its valid UTF-8 text" {
+  assert header("int f(void);\n") == "C"
+  assert header("namespace a {\nint f();\n}\n") == "C++"
+  assert header("  std::string s;\n") == "C++"
+  assert header("namespace a {\n\"\xFF\"\n}\n") == "C"
+}

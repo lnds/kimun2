@@ -4,6 +4,18 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
+## Peak memory on the `kaikai` repository (current)
+
+The 38 MB peak on the `kaikai` repository was one file: `stage0/runtime.h` (522 KB) took km2 to 35.9 MB on its own. Deciding whether a `.h` header is C or C++ checked that its text is valid UTF-8 first, through `utf8.is_valid(string.bytes(src))`, and `string.bytes` builds a list of one cell per byte (about 48 bytes of heap each, lnds/kaikai#3550). The check now runs only once a line only C++ writes is found; a C header never pays it.
+
+| `/usr/bin/time -l` | km | km2 before | km2 now |
+|---|---|---|---|
+| `stage0/runtime.h` | 11.1 MB | 35.9 MB | 9.0 MB |
+| `kaikai` repository at `0990eea3e` | 12.7 MB | 38.5 MB | 11.7 MB |
+| a 396 KB C++ header | 11.0 MB | 28.4 MB | 28.4 MB |
+
+A large C++ header still pays the list until #3550 gives a validation over the `String` itself.
+
 ## `loc` over the language corpus, with a required-literal prefilter (current)
 
 `tools/corpus.sh run`, as below. Output equals km's on 81 repositories; the other 3 are lnds/kaikai#3512.

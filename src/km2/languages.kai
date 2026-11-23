@@ -56,11 +56,8 @@ fn named(name: String) : Option[Spec] =
 pub fn refine(path: String, s: Spec, src: String) : Spec =
   if s.name == "C"
     and extension(base_name(path)) == Some("h")
-    and utf8.is_valid(string.bytes(src))
-    and list.any(
-      string.lines(src),
-      is_cpp_line
-    ) {
+    and list.any(string.lines(src), is_cpp_line)
+    and utf8.is_valid(string.bytes(src)) {
     named("C++") ?? s
   } else {
     s
