@@ -28,9 +28,9 @@ fn resolved(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clo
     application(),
     argv
   ) {
-    # ahu.cli exits 1 on a usage error; km, through clap, exits 2.
+    # km, through clap, reports a usage error as `error: ...`.
     Err(error) -> {
-      Stderr.eprint("error: #{cli.error_message(error)}\n")
+      Stderr.eprint("error: #{cli.error_message(error)}")
       USAGE_ERROR
     }
     Ok(_) -> cli.run_argv(application(), argv)
