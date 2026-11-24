@@ -1,0 +1,114 @@
+# What the reports of the git commands share with km's: dates, rules,
+# `--since`, and how many rows a format lists.
+
+import date
+import km2.git
+import km2.loc_report
+import km2.git.{Repo}
+import km2.selection
+
+#[doc("A Unix time as km prints a day: `YYYY-MM-DD`, in UTC.")]
+pub fn day(ts: Int) : String {
+  let days = if ts >= 0 { ts / 86400 } else { (ts - 86399) / 86400 }
+  let d = date.from_epoch_days(days)
+  let two = (n: Int) => string.pad_left("#{n}", 2, '0')
+  "#{string.pad_left("#{d.year}", 4, '0')}-#{two(d.month)}-#{two(d.day)}"
+}
+
+#[doc("A horizontal rule `width` box-drawing characters wide.")]
+pub fn rule(width: Int) : String = string.repeat("─", width)
+
+#[doc("`s` padded with spaces on the right to `width` characters, as Rust's `{:<width}` pads.")]
+pub fn left(s: String, width: Int) : String = string.pad_right(s, width, ' ')
+
+#[doc("`s` padded with spaces on the left to `width` characters, as Rust's `{:>width}` pads.")]
+pub fn right(s: String, width: Int) : String = string.pad_left(s, width, ' ')
+
+#[doc("km's error for a format only the CI-facing commands write.")]
+pub const CI_FORMAT_ONLY : String = loc_report.CI_FORMAT_ONLY
+
+#[doc("Rows a table shows when `--top` is not given.")]
+pub const DEFAULT_TOP : Int = 20
+
+#[doc("How many of `total` entries a format lists: a table `--top` rows (20 by default), JSON every entry unless `--top` is given, the summaries every entry.")]
+pub fn shown_count(format: String, top: Option[Int], total: Int) : Int {
+  let limit = match format {
+    "table" -> top ?? DEFAULT_TOP
+    "json" -> top ?? total
+    _ -> total
+  }
+  if limit < total { limit } else { total }
+}
+
+#[doc("The Unix time of a `--since` value when one was given.")]
+pub fn since_option(value: Option[String], now: Int) : Result[Option[Int], String] = match value {
+  None -> Ok(None)
+  Some(v) -> since(v, now) |> result.map(Some)
+}
+
+fn digits_end(s: String, i: Int, n: Int) : Int =
+  if i < n and char.is_digit(string.char_at(s, i) ?? 'x') { digits_end(s, i + 1, n) } else { i }
+
+fn unit_seconds(unit: String) : Option[Int] = match unit {
+  "d" -> Some(86400)
+  "day" -> Some(86400)
+  "days" -> Some(86400)
+  "m" -> Some(30 * 86400)
+  "mo" -> Some(30 * 86400)
+  "month" -> Some(30 * 86400)
+  "months" -> Some(30 * 86400)
+  "y" -> Some(365 * 86400)
+  "yr" -> Some(365 * 86400)
+  "year" -> Some(365 * 86400)
+  "years" -> Some(365 * 86400)
+  _ -> None
+}
+
+#[doc("The Unix time a `--since` value names, counted back from `now`, with km's messages for a bad value.")]
+pub fn since(value: String, now: Int) : Result[Int, String] {
+  let s = string.trim(value)
+  let n = string.byte_length(s)
+  let split = digits_end(s, 0, n)
+  if s == "" {
+    Err("empty --since value")
+  } else if split >= n {
+    Err("invalid --since value: \"#{s}\" (no unit, expected e.g. 6m, 1y, 30d)")
+  } else {
+    let count = string.to_int(string.slice(s, 0, split))
+    let unit = string.slice(s, split, n - split)
+    match (count, unit_seconds(unit)) {
+      (None, _) -> Err("invalid --since value: \"#{s}\" (expected e.g. 6m, 1y, 30d)")
+      (Some(_), None) -> Err("unknown unit in --since: \"#{s}\" (use d, m, or y)")
+      (Some(k), Some(secs)) ->
+        if now - k * secs < 0 {
+          Err("--since value goes before Unix epoch")
+        } else {
+          Ok(now - k * secs)
+        }
+    }
+  }
+}
+
+#[doc("Paths compared component by component, as Rust orders a `PathBuf`: `a/b` before `a.rs`.")]
+pub fn by_components(a: [String], b: [String]) : Int = match (a, b) {
+  ([], []) -> 0
+  ([], _) -> -1
+  (_, []) -> 1
+  ([x, ...xs], [y, ...ys]) -> if x < y { -1 } else if y < x { 1 } else { by_components(xs, ys) }
+}
+
+#[doc("The path of a walked file from the root of its repository, as git names it.")]
+pub fn git_path(repo: Repo, root: String, p: String) : String {
+  let rel = selection.relative(root, p)
+  if repo.prefix == "" { rel } else { "#{repo.prefix}/#{rel}" }
+}
+
+#[doc("The repository holding `root`, or km's message for why there is none.")]
+pub fn repository(root: String) : Result[Repo, String] / File + Process =
+  git.discover(root) |> result.map_err(e => "not a git repository (or any parent): #{e}")
+
+#[doc("Says once, on stderr, that a shallow clone's history is short.")]
+pub fn warn_if_shallow(repo: Repo, warning: String) : Unit / Process + Stderr =
+  if git.is_shallow(repo) {
+    Stderr.eprint(warning)
+  }

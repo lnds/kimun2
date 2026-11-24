@@ -1,0 +1,246 @@
+# `age`: how long ago each source file last changed, and whether that
+# makes it active, stale or frozen.
+
+import ahu.cli
+import collections.map
+import time
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum}
+import text
+import km2.config.{Config}
+import km2.git.{Repo}
+import km2.history
+import km2.history.{Frequency}
+import km2.history_report
+import km2.sources
+import km2.sources.{Source}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+#[doc("Whether a file changed recently, a while ago, or long ago.")]
+pub type AgeStatus = AgeActive | AgeStale | AgeFrozen
+
+#[doc("The status's label as km prints it.")]
+pub fn label(s: AgeStatus) : String = match s {
+  AgeActive -> "ACTIVE"
+  AgeStale -> "STALE"
+  AgeFrozen -> "FROZEN"
+}
+
+fn rank(s: AgeStatus) : Int = match s {
+  AgeActive -> 0
+  AgeStale -> 1
+  AgeFrozen -> 2
+}
+
+#[doc("A file's age: when it last changed, how many whole days ago, and its status.")]
+pub type FileAge = { path: String, language: String, last: Int, days: Int, status: AgeStatus }
+
+#[doc("The days under which a file is active, and from which it is frozen.")]
+pub type Thresholds = { active: Int, frozen: Int }
+
+#[doc("A file's age at `now`: active under `active` days, frozen from `frozen` days, stale between.")]
+pub fn classify(path: String, language: String, last: Int, now: Int, t: Thresholds) : FileAge {
+  let days = (if now > last { now - last } else { 0 }) / 86400
+  let status =
+    if days < t.active { AgeActive } else if days < t.frozen { AgeStale } else { AgeFrozen }
+  FileAge { path: path, language: language, last: last, days: days, status: status }
+}
+
+fn compare_ints(a: Int, b: Int) : Int = if a < b { -1 } else if a > b { 1 } else { 0 }
+
+#[doc("Files sorted by `status` (then oldest first), `file`, or `date` (oldest first); ties keep the walk's order.")]
+pub fn sorted(files: [FileAge], by: String) : [FileAge] = match by {
+  "status" -> list.sort_by(
+    files,
+    (a, b) => if a.status == b.status {
+      compare_ints(a.last, b.last)
+    } else {
+      compare_ints(rank(a.status), rank(b.status))
+    }
+  )
+  "file" -> list.sort_by(
+    files,
+    (a, b) => history_report.by_components(string.split(a.path, "/"), string.split(b.path, "/"))
+  )
+  _ -> list.sort_by(files, (a, b) => compare_ints(a.last, b.last))
+}
+
+fn status_count(files: [FileAge], s: AgeStatus) : Int = list.length(files |? (f => f.status == s))
+
+const COL_LANG : Int = 12
+
+const COL_DATE : Int = 13
+
+const COL_DAYS : Int = 4
+
+const COL_STATUS : Int = 6
+
+fn line(
+  col: Int,
+  path: String,
+  language: String,
+  day: String,
+  days: String,
+  status: String
+) : String {
+  let l = history_report.left
+  let r = history_report.right
+  " #{l(path, col)} #{l(language, COL_LANG)} #{r(day, COL_DATE)} #{r(days, COL_DAYS)} #{r(status, COL_STATUS)}"
+}
+
+#[doc("The table of `km age`, with the count of each status.")]
+pub fn table(files: [FileAge], t: Thresholds) : String =
+  if files == [] {
+    "No source files found."
+  } else {
+    let col = files
+      |> list.foldl(4, (w, f) => {
+        let n = text.display_width(f.path)
+        if n > w { n } else { w }
+      })
+    let rule =
+      history_report.rule(1 + col + 1 + COL_LANG + 1 + COL_DATE + 1 + COL_DAYS + 1 + COL_STATUS)
+    let r = history_report.right
+    let rows = files
+      | (f => line(
+        col,
+        f.path,
+        f.language,
+        history_report.day(f.last),
+        "#{f.days}",
+        label(f.status)
+      ))
+    [
+      rule,
+      line(col, "File", "Language", "Last Modified", "Days", "Status"),
+      rule,
+      ...rows,
+      rule,
+      "",
+      "  ACTIVE  #{r("#{status_count(files, AgeActive)}", 5)}  (modified < #{t.active} days)",
+      "  STALE   #{r("#{status_count(files, AgeStale)}", 5)}  (#{t.active} days – #{t.frozen} days)",
+      "  FROZEN  #{r("#{status_count(files, AgeFrozen)}", 5)}  (not modified > #{t.frozen} days)"
+    ]
+      |> string.join("\n")
+  }
+
+fn entry(f: FileAge) : JsonValue =
+  JObj([
+    ("path", JStr(f.path)),
+    ("language", JStr(f.language)),
+    ("last_modified", JStr(history_report.day(f.last))),
+    ("age_days", JNum(f.days)),
+    ("status", JStr(label(f.status)))
+  ])
+
+#[doc("The JSON of `km age`: one entry per file.")]
+pub fn to_json(files: [FileAge]) : String = json.json_encode_pretty(JArr(files | entry), 2)
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(files: [FileAge]) : String =
+  "age files:#{list.length(files)} active:#{status_count(files, AgeActive)} stale:#{status_count(files, AgeStale)} frozen:#{status_count(files, AgeFrozen)}"
+
+fn wanted(status: Option[String]) : Option[AgeStatus] = match status {
+  None -> None
+  Some("active") -> Some(AgeActive)
+  Some("stale") -> Some(AgeStale)
+  Some(_) -> Some(AgeFrozen)
+}
+
+fn render(format: String, files: [FileAge], t: Thresholds) : Result[Unit, String] / Stdout =
+  match format {
+    "json" -> Ok(Stdout.print(to_json(files)))
+    "short" -> Ok(Stdout.print(short(files)))
+    "terse" -> Ok(Stdout.print("#{status_count(files, AgeFrozen)}"))
+    "table" -> Ok(Stdout.print(table(files, t)))
+    _ -> Err(history_report.CI_FORMAT_ONLY)
+  }
+
+fn ages(
+  repo: Repo,
+  root: String,
+  files: [Source],
+  freqs: Map[String, Frequency],
+  at: (Int, Thresholds)
+) : [FileAge] / File + Stderr {
+  let (now, t) = at
+  files
+    || (s => {
+      let rel = history_report.git_path(repo, root, s.path)
+      match map.get(freqs, rel) {
+        Some(f) -> [classify(rel, sources.refined(s).spec.name, f.last, now, t)]
+        None -> {
+          Stderr.eprint("warning: no git history for #{rel}")
+          []
+        }
+      }
+    })
+}
+
+fn thresholds(c: cli.Context, cfg: Config) : Thresholds =
+  Thresholds {
+    active: cli.integer(c, "active-days") ?? cfg.active_days ?? 90,
+    frozen: cli.integer(c, "frozen-days") ?? cfg.frozen_days ?? 365
+  }
+
+fn age(
+  c: cli.Context,
+  cfg: Config,
+  w: Common
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock {
+  let repo = history_report.repository(w.root)!
+  let found = walk_cli.walked_sources(w)
+  history_report.warn_if_shallow(repo, walk_cli.SHALLOW)
+  let freqs = history.frequencies(repo, None)
+  let t = thresholds(c, cfg)
+  if t.active >= t.frozen {
+    Err("--active-days (#{t.active}) must be less than --frozen-days (#{t.frozen})")
+  } else {
+    let keep = wanted(cli.text(c, "status"))
+    let files = ages(repo, w.root, found, freqs, (time.now().secs, t))
+      |? (f => keep == None or keep == Some(f.status))
+      |> sorted(cli.text(c, "sort-by") ?? "date")
+    render(w.format, files, t)
+  }
+}
+
+fn run_age(c: cli.Context) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock =
+  walk_cli.walking(c, (cfg, w) => age(c, cfg, w))
+
+#[doc("The `age` command, with `km age`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+  cli.command(
+    "age",
+    "Analyze code age: classify files as active, stale, or frozen by last git modification",
+    run_age
+  )
+    |> walk_cli.with_common
+    |> cli.with_option(
+      cli.integer_option(
+        "active-days",
+        "Files modified within this many days are Active (default: 90, overridable via .kimun.toml)"
+      )
+        |> cli.value_name("ACTIVE_DAYS")
+    )
+    |> cli.with_option(
+      cli.integer_option(
+        "frozen-days",
+        "Files not modified for more than this many days are Frozen (default: 365, overridable via .kimun.toml)"
+      )
+        |> cli.value_name("FROZEN_DAYS")
+    )
+    |> cli.with_option(
+      cli.text_option_with_default(
+        "sort-by",
+        "Sort by: date (oldest first, default), status, or file",
+        "date"
+      )
+        |> cli.value_name("SORT_BY")
+        |> cli.choices(["date", "status", "file"])
+    )
+    |> cli.with_option(
+      cli.text_option("status", "Show only files with this status: active, stale, or frozen")
+        |> cli.value_name("STATUS")
+        |> cli.choices(["active", "stale", "frozen"])
+    )

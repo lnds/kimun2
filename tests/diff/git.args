@@ -1,0 +1,22 @@
+churn ../kimun
+churn --format json ../kimun
+churn --format short ../kimun
+churn --format terse ../kimun
+churn --sort-by rate --top 10 ../kimun
+churn --sort-by file --format json ../kimun
+churn --since 1y ../kimun
+churn --include-tests --top 5 ../kimun/src
+churn .
+age ../kimun
+age --format json ../kimun
+age --format short ../kimun
+age --format terse ../kimun
+age --sort-by status ../kimun
+age --sort-by file --format json ../kimun
+age --status stale ../kimun
+age .
+authors --format short ../kimun
+authors --since 1m ../kimun
+authors --include-tests --format json ../minerva
+authors .
+churn --list-excluded ../kimun/src

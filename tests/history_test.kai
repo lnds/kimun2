@@ -1,0 +1,55 @@
+import collections.map
+import km2.history
+import km2.history.{Frequency}
+
+const Z : String = "0000000000000000000000000000000000000000"
+
+const A : String = "1111111111111111111111111111111111111111"
+
+const B : String = "2222222222222222222222222222222222222222"
+
+fn modified(path: String) : String = ":100644 100644 #{A} #{B} M\x00#{path}\x00"
+
+fn added(path: String) : String = ":000000 100644 #{Z} #{A} A\x00#{path}\x00"
+
+fn moved(old: String, new: String, same: Bool) : String {
+  let after = if same { A } else { B }
+  ":100644 100644 #{A} #{after} R#{if same { "100" } else { "087" }}\x00#{old}\x00#{new}\x00"
+}
+
+fn commit(time: Int, entries: [String]) : String =
+  "\x01#{time}\x00\n#{string.join(entries, "")}"
+
+fn freq(log: String, since: Option[Int], path: String) : Option[Frequency] =
+  map.get(history.frequencies_of(history.parse_log(log), since), path)
+
+test "each commit counts once for each file it changed" {
+  let log = commit(300, [modified("a.rs"), modified("b.rs")]) ++ commit(100, [added("a.rs")])
+  assert freq(log, None, "a.rs") == Some(Frequency { commits: 2, first: 100, last: 300 })
+  assert freq(log, None, "b.rs") == Some(Frequency { commits: 1, first: 300, last: 300 })
+}
+
+test "older commits of a renamed file count under its name at HEAD" {
+  let log = commit(300, [moved("old.rs", "new.rs", false)])
+    ++ commit(200, [modified("old.rs")])
+    ++ commit(100, [added("old.rs")])
+  assert freq(log, None, "new.rs") == Some(Frequency { commits: 3, first: 100, last: 300 })
+  assert freq(log, None, "old.rs") == None
+}
+
+test "a rename that keeps the content is no change, and renames chain" {
+  let log = commit(400, [moved("b.rs", "c.rs", true)])
+    ++ commit(300, [moved("a.rs", "b.rs", false)])
+    ++ commit(100, [added("a.rs")])
+  assert freq(log, None, "c.rs") == Some(Frequency { commits: 2, first: 100, last: 300 })
+}
+
+test "since stops the walk at the first older commit" {
+  let log = commit(300, [modified("a.rs")]) ++ commit(100, [modified("a.rs")])
+  assert freq(log, Some(200), "a.rs") == Some(Frequency { commits: 1, first: 300, last: 300 })
+}
+
+test "paths with spaces and non-ASCII names survive" {
+  let log = commit(100, [added("dir with space/ñandú.rs")])
+  assert freq(log, None, "dir with space/ñandú.rs") != None
+}

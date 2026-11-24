@@ -131,3 +131,13 @@ pub fn of(
       if k == KData and language == "YAML" and holds_infra(read_text(path)) { KInfra } else { k }
     }
   }
+
+#[doc("Whether the metrics of code read a file of kind `k`: the kinds `--kind` chose, else code, and infrastructure written in a programming language unless `[kinds] separate` keeps it apart.")]
+pub fn measures(s: Selection, k: Kind, is_code: Bool, separate: Bool) : Bool = match s.chosen {
+  Some(ks) -> list.contains(ks, k)
+  None -> match k {
+    KCode -> true
+    KInfra -> (not separate) and is_code
+    _ -> false
+  }
+}

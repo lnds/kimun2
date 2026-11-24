@@ -1,0 +1,179 @@
+# What the history of a repository says about its files and authors, read
+# through `git log` as km reads it with libgit2: non-merge commits, newest
+# first, each compared with its first parent, renames followed so that the
+# commits of a file before a move count for it under its name at HEAD.
+
+import collections.map
+import os.process
+import effects.os.{Child}
+import km2.git
+import km2.git.{Repo}
+
+#[doc("How often and when a file changed: its commits and the times of the first and last.")]
+pub type Frequency = { commits: Int, first: Int, last: Int }
+
+#[doc("A file a commit changed: its path, the path it had before a rename, whether it was renamed, and whether its content stayed as it was.")]
+pub type Change = { path: String, old_path: String, renamed: Bool, same_content: Bool }
+
+#[doc("A commit: its time and the files it changed.")]
+pub type Commit = { time: Int, changes: [Change] }
+
+const START : String = "\x01"
+
+const FIELD : String = "\x02"
+
+fn meta_words(meta: String) : [String] = string.split(meta, " ") |? (w => w != "")
+
+fn change_of(meta: String, old_path: String, path: String) : Change {
+  let words = meta_words(meta)
+  let status = list.last(words) ?? ""
+  let renamed = string.starts_with(status, "R")
+  Change {
+    path: path,
+    old_path: old_path,
+    renamed: renamed,
+    same_content: list.nth(words, 2) == list.nth(words, 3)
+  }
+}
+
+fn changes_of(tokens: [String], acc: [Change]) : [Change] = match tokens {
+  [meta, old_path, path, ...rest] if string.starts_with(meta, ":")
+    and string.starts_with(list.last(meta_words(meta)) ?? "", "R") ->
+    changes_of(rest, [change_of(meta, old_path, path), ...acc])
+  [meta, path, ...rest] if string.starts_with(meta, ":") ->
+    changes_of(rest, [change_of(meta, path, path), ...acc])
+  [_, ...rest] -> changes_of(rest, acc)
+  [] -> list.reverse(acc)
+}
+
+#[doc("A commit as `git log -z --raw --format=%x01<fields>` writes it, without its leading separator: the header fields, and the files it changed.")]
+pub fn parse_commit(text: String) : (String, [Change]) {
+  let (header, body) = string.split_once(text, "\x00") ?? ((text, ""))
+  let tokens = string.split(body, "\x00") | (t => string.drop_prefix(t, "\n") ?? t)
+  (header, changes_of(tokens, []))
+}
+
+#[doc("The commits of a whole `git log -z --raw --format=%x01%ct` text, newest first.")]
+pub fn parse_log(text: String) : [Commit] =
+  string.split(text, START)
+    |? (t => t != "")
+    | (t => {
+      let (header, changes) = parse_commit(t)
+      Commit { time: string.to_int(header) ?? 0, changes: changes }
+    })
+
+# Reading the log as it arrives: the text after the last separator may be
+# a commit cut in two, kept until the next chunk or the end.
+
+fn feed(c: Child, held: [String], state: s, step: (s, String) -> s) : s / Process =
+  match process.read_stdout(c) {
+    Ok(chunk) if chunk != "" -> match string.split(chunk, START) {
+      [first] -> feed(c, [first, ...held], state, step)
+      [first, ...rest] -> {
+        let whole = string.join(list.reverse([first, ...held]), "")
+        let complete = list.take(rest, list.length(rest) - 1)
+        let next = [whole, ...complete] |? (t => t != "") |> list.foldl(state, step)
+        feed(c, [list.last(rest) ?? ""], next, step)
+      }
+      [] -> feed(c, held, state, step)
+    }
+    _ -> {
+      let last = string.join(list.reverse(held), "")
+      if last == "" { state } else { step(state, last) }
+    }
+  }
+
+fn fold_log(repo: Repo, args: [String], state: s, step: (s, String) -> s) : s / Process =
+  match process.pipe_from(
+    "git",
+    ["-C", repo.work_tree, "log", "--no-merges", "--no-color", ...args]
+  ) {
+    Err(_) -> state
+    Ok(c) -> {
+      let result = feed(c, [], state, step)
+      let _ = process.wait(c)
+      result
+    }
+  }
+
+# Frequencies: each commit counts once for every file it changed, by its
+# name at HEAD. A rename maps the old path to that name for the older
+# commits; a rename that keeps the content is no change.
+
+type Tally = { renames: Map[String, String], freqs: Map[String, Frequency], stopped: Bool }
+
+fn count(freqs: Map[String, Frequency], name: String, time: Int) : Map[String, Frequency] =
+  match map.get(freqs, name) {
+    None -> map.put(freqs, name, Frequency { commits: 1, first: time, last: time })
+    Some(f) -> map.put(freqs, name, Frequency {
+      commits: f.commits + 1,
+      first: if time < f.first { time } else { f.first },
+      last: if time > f.last { time } else { f.last }
+    })
+  }
+
+fn tally_commit(t: Tally, c: Commit) : Tally {
+  let name = (p: String) => map.get(t.renames, p) ?? p
+  let counted = c.changes
+    |? (ch => not (ch.renamed and ch.same_content))
+    |> list.foldl(t.freqs, (fs, ch) => count(fs, name(ch.path), c.time))
+  let renames = c.changes
+    |? .renamed
+    |> list.foldl(t.renames, (rs, ch) => map.put(rs, ch.old_path, name(ch.path)))
+  Tally { renames: renames, freqs: counted, stopped: false }
+}
+
+#[doc("How often and when each file changed, by its name at HEAD, over the commits of a log newest first; with `since`, the walk stops at the first commit older than it.")]
+pub fn frequencies_of(commits: [Commit], since: Option[Int]) : Map[String, Frequency] =
+  (commits |> list.foldl(start_tally(), (t, c) => step_tally(t, c, since))).freqs
+
+fn start_tally() : Tally = Tally { renames: %{}, freqs: %{}, stopped: false }
+
+fn step_tally(t: Tally, c: Commit, since: Option[Int]) : Tally =
+  if t.stopped {
+    t
+  } else {
+    match since {
+      Some(ts) if c.time < ts -> Tally { ...t, stopped: true }
+      _ -> tally_commit(t, c)
+    }
+  }
+
+fn step_text(t: Tally, text: String, since: Option[Int]) : Tally =
+  if t.stopped {
+    t
+  } else {
+    let (header, changes) = parse_commit(text)
+    step_tally(t, Commit { time: string.to_int(header) ?? 0, changes: changes }, since)
+  }
+
+const RAW : [String] = ["--no-show-signature", "--root", "-M", "--raw", "--no-abbrev", "-z"]
+
+#[doc("How often and when each file of the repository changed, by its path from the repository's root at HEAD.")]
+pub fn frequencies(repo: Repo, since: Option[Int]) : Map[String, Frequency] / Process =
+  fold_log(
+    repo,
+    [...RAW, "--format=#{START}%ct"],
+    start_tally(),
+    (t, text) => step_text(t, text, since)
+  ).freqs
+
+# The last commit of each author, through `.mailmap`, by km's identity.
+
+fn last_of(times: Map[String, Int], text: String) : Map[String, Int] =
+  match string.split(string.trim_right(text), FIELD) {
+    [name, email, time] -> {
+      let who = git.identity(name, email)
+      if map.contains(times, who) { times } else { map.put(times, who, string.to_int(time) ?? 0) }
+    }
+    _ -> times
+  }
+
+#[doc("The author time of the newest commit of each author, by identity, read through `.mailmap`.")]
+pub fn last_commit_times(repo: Repo) : Map[String, Int] / Process =
+  fold_log(
+    repo,
+    ["--no-show-signature", "--format=#{START}%aN#{FIELD}%aE#{FIELD}%at"],
+    %{},
+    last_of
+  )

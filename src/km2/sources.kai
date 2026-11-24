@@ -76,3 +76,14 @@ pub fn files(
   }
   Found { sources: kept, errors: walked.errors }
 }
+
+#[doc("A source with its language refined by its text, as km names a C header that only C++ could have written; only C headers are read.")]
+pub fn refined(s: Source) : Source / File =
+  if s.spec.name == "C" and string.ends_with(s.path, ".h") {
+    match file.read(s.path) {
+      Ok(src) -> Source { ...s, spec: languages.refine(s.path, s.spec, src) }
+      Err(_) -> s
+    }
+  } else {
+    s
+  }

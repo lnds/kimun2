@@ -1,0 +1,238 @@
+# `authors`: who owns the code, from what git blames for each line of the
+# source files at HEAD.
+
+import ahu.cli
+import collections.map
+import collections.set
+import time
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum}
+import text
+import km2.generated
+import km2.git
+import km2.git.{Hunk, Repo}
+import km2.history
+import km2.history_report
+import km2.sources
+import km2.sources.{Source}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+#[doc("One author's lines in one file, and the time of the newest of them.")]
+pub type Blamed = { name: String, email: String, lines: Int, last: Int }
+
+fn later(a: Int, b: Int) : Int = if a > b { a } else { b }
+
+fn compare_owners(a: (String, Blamed), b: (String, Blamed)) : Int =
+  if a.snd.lines != b.snd.lines {
+    b.snd.lines - a.snd.lines
+  } else if a.snd.last != b.snd.last {
+    if a.snd.last > b.snd.last { -1 } else { 1 }
+  } else if a.fst < b.fst {
+    -1
+  } else if b.fst < a.fst {
+    1
+  } else {
+    0
+  }
+
+#[doc("The lines of each author of a file, most lines first, then the newest, then the identity.")]
+pub fn per_author(hunks: [Hunk]) : [Blamed] {
+  let by_identity = hunks
+    |> list.foldl(%{}, (m, h) => {
+      let who = git.identity(h.author, h.email)
+      let before =
+        map.get(m, who) ?? Blamed { name: h.author, email: h.email, lines: 0, last: h.time }
+      map.put(m, who, Blamed {
+        ...before,
+        lines: before.lines + h.lines,
+        last: later(before.last, h.time)
+      })
+    })
+  map.to_pairs(by_identity) | (p => (p.fst, p.snd)) |> list.sort_by(compare_owners) | .snd
+}
+
+#[doc("An author across the files: the files they own, their lines, the languages they wrote, and when they were last active.")]
+pub type Summary = {
+  name: String,
+  email: String,
+  owned: Int,
+  lines: Int,
+  languages: Set[String],
+  last: Int
+}
+
+fn add_file(acc: Map[String, Summary], file: (String, [Blamed])) : Map[String, Summary] {
+  let (language, blames) = file
+  let primary = list.head(blames) |> option.map(b => git.identity(b.name, b.email))
+  blames
+    |> list.foldl(acc, (m, b) => {
+      let who = git.identity(b.name, b.email)
+      let before = map.get(m, who) ?? Summary {
+        name: b.name,
+        email: b.email,
+        owned: 0,
+        lines: 0,
+        languages: set.empty(),
+        last: 0
+      }
+      map.put(m, who, Summary {
+        ...before,
+        owned: before.owned + (if primary == Some(who) { 1 } else { 0 }),
+        lines: before.lines + b.lines,
+        languages: set.insert(before.languages, language),
+        last: later(before.last, b.last)
+      })
+    })
+}
+
+#[doc("The authors of the files, most lines first, ties by identity; each last active at their newest commit when `last` knows it.")]
+pub fn summaries(files: [(String, [Blamed])], last: Map[String, Int]) : [Summary] =
+  map.to_pairs(files |> list.foldl(%{}, add_file))
+    | (p => Summary { ...p.snd, last: map.get(last, p.fst) ?? p.snd.last })
+    |> list.sort_by((a, b) => b.lines - a.lines)
+
+const COL_OWNED : Int = 7
+
+const COL_LINES : Int = 10
+
+const COL_DATE : Int = 11
+
+fn byte_order(a: String, b: String) : Int = if a < b { -1 } else if b < a { 1 } else { 0 }
+
+fn languages_of(s: Summary) : [String] = set.to_list(s.languages) |> list.sort_by(byte_order)
+
+fn languages_text(s: Summary) : String = string.join(languages_of(s), ", ")
+
+fn pad_display(s: String, width: Int) : String {
+  let n = text.display_width(s)
+  if n >= width { s } else { s ++ string.repeat(" ", width - n) }
+}
+
+fn widest(xs: [Int], least: Int) : Int =
+  xs |> list.foldl(least, (w, n) => if n > w { n } else { w })
+
+#[doc("The table of `km authors`.")]
+pub fn table(authors: [Summary]) : String {
+  let col_author = widest(authors | (a => text.display_width(a.name)), text.display_width("Author"))
+  let col_langs = widest(authors | (a => string.byte_length(languages_text(a))), 9)
+  let rule = history_report.rule(
+    1 + col_author + 1 + COL_OWNED + 1 + COL_LINES + 2 + col_langs + 1 + COL_DATE
+  )
+  let l = history_report.left
+  let r = history_report.right
+  let line =
+    (author: String, owned: String, lines: String, langs: String, day: String) => " #{pad_display(author, col_author)} #{r(owned, COL_OWNED)} #{r(lines, COL_LINES)}  #{l(langs, col_langs)} #{r(day, COL_DATE)}"
+  [
+    rule,
+    line("Author", "Owned", "Lines", "Languages", "Last Active"),
+    rule,
+    ...authors
+      | (a => line(
+        a.name,
+        "#{a.owned}",
+        "#{a.lines}",
+        languages_text(a),
+        history_report.day(a.last)
+      )),
+    rule
+  ]
+    |> string.join("\n")
+}
+
+fn entry(a: Summary) : JsonValue =
+  JObj([
+    ("name", JStr(a.name)),
+    ("email", JStr(a.email)),
+    ("owned_files", JNum(a.owned)),
+    ("lines", JNum(a.lines)),
+    ("languages", JArr(languages_of(a) | JStr)),
+    ("last_active", JStr(history_report.day(a.last)))
+  ])
+
+#[doc("The JSON of `km authors`: one entry per author.")]
+pub fn to_json(authors: [Summary]) : String = json.json_encode_pretty(JArr(authors | entry), 2)
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(authors: [Summary]) : String {
+  let files = authors |> list.foldl(0, (n, a) => n + a.owned)
+  let lines = authors |> list.foldl(0, (n, a) => n + a.lines)
+  "authors count:#{list.length(authors)} files:#{files} lines:#{lines}"
+}
+
+type Walked = { files: [(String, [Blamed])], warned: Bool }
+
+fn render(format: String, authors: [Summary]) : Result[Unit, String] / Stdout = match format {
+  "json" -> Ok(Stdout.print(to_json(authors)))
+  "short" -> Ok(Stdout.print(short(authors)))
+  "terse" -> Ok(Stdout.print("#{list.length(authors)}"))
+  "table" -> Ok(Stdout.print(table(authors)))
+  _ -> Err(history_report.CI_FORMAT_ONLY)
+}
+
+type Blaming = { repo: Repo, root: String, since: Option[Int] }
+
+fn since_kept(hunks: [Hunk], since: Option[Int]) : [Hunk] = match since {
+  Some(ts) -> hunks |? (h => h.committed >= ts)
+  None -> hunks
+}
+
+fn blame_source(b: Blaming, acc: Walked, s: Source) : Walked / File + Process + Stderr {
+  let rel = history_report.git_path(b.repo, b.root, s.path)
+  let (hunks, fell_back) = git.blame(b.repo, rel)
+  if hunks == None {
+    Stderr.eprint("warning: blame #{rel}: #{git.missing_at_head(b.repo, rel)}")
+  }
+  if fell_back and (not acc.warned) {
+    Stderr.eprint("warning: git blame cannot read .git-blame-ignore-revs; blaming without it")
+  }
+  let blames = per_author(since_kept(hunks ?? [], b.since))
+  let files =
+    if blames == [] { acc.files } else { [(sources.refined(s).spec.name, blames), ...acc.files] }
+  Walked { files: files, warned: acc.warned or fell_back }
+}
+
+fn report(
+  format: String,
+  repo: Repo,
+  files: [(String, [Blamed])]
+) : Result[Unit, String] / Process + Stdout =
+  if files == [] {
+    Stdout.print(if format == "json" { "[]" } else { "No authors found." })
+    Ok(())
+  } else {
+    render(format, summaries(files, history.last_commit_times(repo)))
+  }
+
+fn authors(
+  c: cli.Context,
+  w: Common
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock {
+  let repo = history_report.repository(w.root)!
+  let since = history_report.since_option(cli.text(c, "since"), time.now().secs)!
+  let found = walk_cli.walked_sources(w)
+  history_report.warn_if_shallow(repo, walk_cli.SHALLOW)
+  let b = Blaming { repo: repo, root: w.root, since: since }
+  let walked = found
+    |? (s => not generated.is_generated(s.path))
+    |> list.foldl(Walked { files: [], warned: false }, (acc, s) => blame_source(b, acc, s))
+  report(w.format, repo, list.reverse(walked.files))
+}
+
+fn run_authors(
+  c: cli.Context
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock =
+  walk_cli.walking(c, (_cfg, w) => authors(c, w))
+
+#[doc("The `authors` command, with `km authors`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+  cli.command(
+    "authors",
+    "Summarize code ownership by author: files owned, lines, languages, last active date",
+    run_authors
+  )
+    |> walk_cli.with_common
+    |> cli.with_option(
+      cli.text_option("since", "Count only the lines committed since this time (e.g. 6m, 1y, 30d)")
+        |> cli.value_name("SINCE")
+    )

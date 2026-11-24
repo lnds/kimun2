@@ -144,3 +144,19 @@ pub fn identity(name: String, email: String) : String {
   let e = string.trim(email)
   if e == "" or e == "unknown" { name } else { string.to_lower_unicode(e) }
 }
+
+fn first_missing(repo: Repo, done: [String], rest: [String]) : String / Process = match rest {
+  [] -> list.last(done) ?? ""
+  [part, ...more] -> {
+    let prefix = string.join([...done, part], "/")
+    if run(["-C", repo.work_tree, "cat-file", "-e", "HEAD:#{prefix}"]) == None {
+      part
+    } else {
+      first_missing(repo, [...done, part], more)
+    }
+  }
+}
+
+#[doc("Why a path cannot be blamed at HEAD, as libgit2 words it: the first part of it that HEAD's tree lacks.")]
+pub fn missing_at_head(repo: Repo, rel: String) : String / Process =
+  "the path '#{first_missing(repo, [], string.split(rel, "/"))}' does not exist in the given tree; class=Tree (14); code=NotFound (-3)"

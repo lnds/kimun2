@@ -1,0 +1,255 @@
+# `churn`: how fast each source file changes, in commits per month, from
+# the history git keeps of it.
+
+import ahu.cli
+import collections.map
+import math.real
+import time
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
+import text
+import km2.config.{Config}
+import km2.generated
+import km2.git
+import km2.git.{Repo}
+import km2.history
+import km2.history.{Frequency}
+import km2.history_report
+import km2.kinds
+import km2.selection
+import km2.sources
+import km2.sources.{Source}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+#[doc("How fast a file changes: under one commit a month, one to four, or more.")]
+pub type ChurnLevel = ChurnLow | ChurnMedium | ChurnHigh
+
+#[doc("The level's label as km prints it.")]
+pub fn label(l: ChurnLevel) : String = match l {
+  ChurnLow -> "LOW"
+  ChurnMedium -> "MEDIUM"
+  ChurnHigh -> "HIGH"
+}
+
+#[doc("A file's churn: its commits, their rate per month, its first and last commit times, and its level.")]
+pub type FileChurn = {
+  path: String,
+  language: String,
+  commits: Int,
+  rate: Real,
+  first: Int,
+  last: Int,
+  level: ChurnLevel
+}
+
+const SECS_PER_MONTH : Real = 2592000.0
+
+#[doc("A file's churn: its commits per month from `start` (its first commit, or the start of `--since`) to `now`, over one month at least.")]
+pub fn classify(path: String, language: String, f: Frequency, start: Int, now: Int) : FileChurn {
+  let span = if now > start { int_to_real(now - start) } else { 0.0 }
+  let rate = int_to_real(f.commits) / real.max(span / SECS_PER_MONTH, 1.0)
+  let level = if rate > 4.0 { ChurnHigh } else if rate >= 1.0 { ChurnMedium } else { ChurnLow }
+  FileChurn {
+    path: path,
+    language: language,
+    commits: f.commits,
+    rate: rate,
+    first: f.first,
+    last: f.last,
+    level: level
+  }
+}
+
+#[doc("Files sorted by `commits` (most first), `rate` (fastest first) or `file`; ties keep the walk's order.")]
+pub fn sorted(files: [FileChurn], by: String) : [FileChurn] = match by {
+  "rate" -> list.sort_by(
+    files,
+    (a, b) => if a.rate > b.rate { -1 } else if a.rate < b.rate { 1 } else { 0 }
+  )
+  "file" -> list.sort_by(
+    files,
+    (a, b) => history_report.by_components(string.split(a.path, "/"), string.split(b.path, "/"))
+  )
+  _ -> list.sort_by(files, (a, b) => b.commits - a.commits)
+}
+
+# Reports.
+
+const COL_LANG : Int = 10
+
+const COL_COMMITS : Int = 7
+
+const COL_RATE : Int = 10
+
+const COL_DATE : Int = 10
+
+const COL_LEVEL : Int = 6
+
+const FIXED_WIDTH : Int = 8 + COL_LANG + COL_COMMITS + COL_RATE + COL_DATE + COL_LEVEL
+
+fn level_count(files: [FileChurn], l: ChurnLevel) : Int = list.length(files |? (f => f.level == l))
+
+fn path_column(files: [FileChurn]) : Int =
+  files
+    |> list.foldl(4, (w, f) => {
+      let n = text.display_width(f.path)
+      if n > w { n } else { w }
+    })
+
+fn table_row(col: Int, f: FileChurn) : String {
+  let r = history_report.right
+  " #{history_report.left(f.path, col)}  #{r(f.language, COL_LANG)} #{r("#{f.commits}", COL_COMMITS)} #{r(real.to_fixed(f.rate, 2), COL_RATE)} #{r(history_report.day(f.last), COL_DATE)} #{r(label(f.level), COL_LEVEL)}"
+}
+
+#[doc("The table of `km churn`: the first `shown` files, and the count of each level over all of them.")]
+pub fn table(files: [FileChurn], shown: Int) : String =
+  if files == [] {
+    "No source files found in git history."
+  } else {
+    let rows = list.take(files, shown)
+    let col = path_column(rows)
+    let rule = history_report.rule(col + FIXED_WIDTH)
+    let r = history_report.right
+    let head =
+      " #{history_report.left("File", col)}  #{r("Language", COL_LANG)} #{r("Commits", COL_COMMITS)} #{r("Rate/Month", COL_RATE)} #{r("Last Commit", COL_DATE)} #{r("Level", COL_LEVEL)}"
+    [
+      "Code Churn — Change Frequency by File",
+      rule,
+      head,
+      rule,
+      ...rows | (f => table_row(col, f)),
+      rule,
+      "",
+      "  HIGH    #{r("#{level_count(files, ChurnHigh)}", 5)}  (> 4 commits/month — moving targets)",
+      "  MEDIUM  #{r("#{level_count(files, ChurnMedium)}", 5)}  (1–4 commits/month — active development)",
+      "  LOW     #{r("#{level_count(files, ChurnLow)}", 5)}  (< 1 commit/month — stable)"
+    ]
+      |> string.join("\n")
+  }
+
+fn entry(f: FileChurn) : JsonValue =
+  JObj([
+    ("path", JStr(f.path)),
+    ("language", JStr(f.language)),
+    ("commits", JNum(f.commits)),
+    ("rate_per_month", JReal(real.round(f.rate * 100.0) / 100.0)),
+    ("first_commit", JStr(history_report.day(f.first))),
+    ("last_commit", JStr(history_report.day(f.last))),
+    ("level", JStr(label(f.level)))
+  ])
+
+#[doc("The JSON of `km churn`: one entry per file.")]
+pub fn to_json(files: [FileChurn]) : String = json.json_encode_pretty(JArr(files | entry), 2)
+
+fn total_commits(files: [FileChurn]) : Int = files |> list.foldl(0, (n, f) => n + f.commits)
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(files: [FileChurn]) : String {
+  let top = match files {
+    [f, ..._] -> f.path
+    [] -> "-"
+  }
+  "churn files:#{list.length(files)} total_commits:#{total_commits(files)} top:#{top}"
+}
+
+# The command.
+
+#[doc("The source files the metrics of code read: of the kinds they measure, without generated files.")]
+pub fn code_files(w: Common, separate: Bool) : [Source] / File + Env + Stderr {
+  walk_cli.walked_sources(w)
+    |? (s => kinds.measures(w.selection, s.kind, s.spec.is_code, separate))
+    |? (s => not generated.is_generated(s.path))
+}
+
+fn render(format: String, files: [FileChurn], shown: Int) : Result[Unit, String] / Stdout =
+  match format {
+    "json" -> Ok(Stdout.print(to_json(list.take(files, shown))))
+    "short" -> Ok(Stdout.print(short(files)))
+    "terse" -> Ok(Stdout.print("#{total_commits(files)}"))
+    "table" -> Ok(Stdout.print(table(files, shown)))
+    _ -> Err(history_report.CI_FORMAT_ONLY)
+  }
+
+fn no_commits(since: Option[Int]) : String =
+  if since == None {
+    "No commits found in the repository."
+  } else {
+    "No commits found in the specified time range."
+  }
+
+fn churn_of(
+  repo: Repo,
+  w: Common,
+  files: [Source],
+  freqs: Map[String, Frequency],
+  window: (Option[Int], Int)
+) : [FileChurn] / File {
+  let (since, now) = window
+  files
+    || (s => {
+      let rel = history_report.git_path(repo, w.root, s.path)
+      match map.get(freqs, rel) {
+        None -> []
+        Some(f) -> [classify(rel, sources.refined(s).spec.name, f, since ?? f.first, now)]
+      }
+    })
+}
+
+fn churn(
+  c: cli.Context,
+  cfg: Config,
+  w: Common
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock {
+  let repo = history_report.repository(w.root)!
+  let now = time.now().secs
+  let since = history_report.since_option(cli.text(c, "since"), now)!
+  history_report.warn_if_shallow(repo, walk_cli.SHALLOW)
+  let freqs = history.frequencies(repo, since)
+  if map.is_empty(freqs) {
+    Stderr.eprint(no_commits(since))
+    Ok(())
+  } else {
+    let files = churn_of(repo, w, code_files(w, cfg.separate), freqs, (since, now))
+      |> sorted(cli.text(c, "sort-by") ?? "commits")
+    render(
+      w.format,
+      files,
+      history_report.shown_count(w.format, cli.integer(c, "top"), list.length(files))
+    )
+  }
+}
+
+fn run_churn(
+  c: cli.Context
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock =
+  walk_cli.walking(c, (cfg, w) => churn(c, cfg, w))
+
+#[doc("The `churn` command, with `km churn`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+  cli.command(
+    "churn",
+    "Analyze code churn: pure change frequency per file (git commits only)",
+    run_churn
+  )
+    |> walk_cli.with_common
+    |> cli.with_option(
+      cli.integer_option(
+        "top",
+        "Rows of the table (default: 20); JSON lists every one of the files unless given"
+      )
+        |> cli.value_name("TOP")
+    )
+    |> cli.with_option(
+      cli.text_option_with_default(
+        "sort-by",
+        "Sort by: commits (default), rate (commits/month), or file",
+        "commits"
+      )
+        |> cli.value_name("SORT_BY")
+        |> cli.choices(["commits", "rate", "file"])
+    )
+    |> cli.with_option(
+      cli.text_option("since", "Only consider commits since this time (e.g. 6m, 1y, 30d)")
+        |> cli.value_name("SINCE")
+    )

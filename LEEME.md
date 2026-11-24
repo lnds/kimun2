@@ -4,11 +4,11 @@ Métricas de código sobre árboles de sintaxis: el sucesor de [km (Kimün)](htt
 
 km2 apunta a reemplazar a `km` sin cambios para quien lo usa: los mismos comandos, flags, formatos de salida, esquema JSON y `.kimun.toml`, con mejores mediciones donde un árbol de sintaxis ve lo que una lectura léxica no alcanza. Hasta llegar a la paridad, `km` sigue siendo la herramienta a usar.
 
-Estado: `loc` está portado, con todas las opciones y formatos de `km loc`. Los demás comandos todavía no están implementados.
+Estado: `loc`, `churn`, `age` y `authors` están portados, con todas las opciones y formatos de sus pares en `km`. Los demás comandos todavía no están implementados.
 
 ## Compilación
 
-Requiere kaikai 0.198.0 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`.
+Requiere kaikai 0.199.2 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`, `churn`, `age` y `authors`.
 
 ```sh
 make build   # ./km2
@@ -21,7 +21,7 @@ El corpus de lenguajes, `tests/corpus/repos.tsv`, lista dos repositorios reales 
 
 ## km frente a km2
 
-Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Ninguno por ahora: `loc` informa lo mismo que `km loc`.
+Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Ninguno por ahora: los comandos portados informan lo mismo que sus pares en `km`.
 
 | Comando | Campo | km | km2 | Razón |
 |---|---|---|---|---|
@@ -33,7 +33,11 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 | Comportamiento | km | km2 | Aguas arriba |
 |---|---|---|---|
 | Formato del JSON | con sangría | compacto (mismo contenido) | lnds/kaikai#3521 |
-| Una línea con solo espacios no ASCII (U+00A0, U+0085, U+3000), `\v` o `\f` | en blanco | código | lnds/kaikai#3512 |
+| Una línea cuyo único contenido es un byte UTF-8 inválido que kaikai decodifica como espacio (un `0x85` suelto, un `0xE9` truncado) | código | en blanco | lnds/kaikai#3555 |
+| Un comando que falla (`--since 6x`, una ruta fuera de un repositorio) | `error: ...` | `Error: ...` | kaikailang-org/ahu#47 |
+| `churn`, `age`: un renombre cerca del umbral de similitud del 50 % | lo sigue según puntúa libgit2 | lo sigue según puntúa `git log -M` | km2 lee la historia con el programa `git`; kaikai no tiene enlace a libgit2. En `lnds/kaikai`, difieren 5 de 879 archivos. |
+| `authors`: `last_active` de un autor cuyos commits comparten la fecha de commit | visto una vez como la fecha de autor de un commit anterior (`lnds/kimun`, un autor) | la fecha de autor del commit más nuevo | Causa sin fijar: un repositorio armado con la misma forma da la misma fecha en ambos. |
 | Un directorio que no se puede leer | avisa, con el código de error del sistema | avisa, sin el código | lnds/kaikai#3535 |
 | Un archivo que no se puede leer | `<ruta>: Permission denied (os error 13)` | `<ruta>: read_file: cannot open file` | lnds/kaikai#3535 |
 | Un elemento desconocido en un `--kind` separado por comas (`code,nope`) | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#45 |
+| Reconocer archivos generados por un source map nombrado al final | lee los últimos 512 bytes | lee el archivo completo (mismo resultado, más lectura) | lnds/kaikai#3562 |

@@ -12,7 +12,9 @@ import km2.kinds.{Kind, Selection, Declared, KCode, KDocs, KInfra, KData}
 import km2.rust_tests
 import km2.selection
 import km2.selection.{Filter}
+import km2.loc
 import km2.sources
+import km2.sources.{Source}
 import km2.walk
 
 pub const FORMATS : [String] =
@@ -144,6 +146,28 @@ pub fn list_excluded(o: Common) : String / File + Env {
 #[doc("The warning km gives once when the repository is a shallow clone.")]
 pub const SHALLOW : String =
   "warning: shallow clone: the history stops at the commits fetched, so commit counts, authors and ages read from it are short (git fetch --unshallow)"
+
+#[doc("The source files a command reads, in walk order, after warning about the directories it could not read.")]
+pub fn walked_sources(w: Common) : [Source] / File + Env + Stderr {
+  let found = sources.files(w.root, w.exclude_tests, w.filter, w.selection)
+  loc.warn_unreadable(w.root, found.errors)
+  found.sources
+}
+
+#[doc("Runs a walking command: `--list-excluded` lists what the filters leave out, else `body` runs with `.kimun.toml` and the common arguments.")]
+pub fn walking(
+  c: cli.Context,
+  body: (Config, Common) -> Result[Unit, String] / e
+) : Result[Unit, String] / File + Env + Stdout + Stderr + e {
+  let cfg = config.load()
+  let w = common(c, cfg)!
+  if w.list_excluded {
+    Stdout.print(list_excluded(w))
+    Ok(())
+  } else {
+    body(cfg, w)
+  }
+}
 
 #[doc("A command with the path argument and the options every walking command takes.")]
 pub fn with_common[e](cmd: cli.Command[e]) : cli.Command[e] =
