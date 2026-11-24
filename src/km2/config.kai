@@ -11,12 +11,15 @@ import encoding.toml.{TomlValue, TStr, TBool, TInt, TReal, TArr, TTbl}
 #[doc("The globs `[kinds]` declares for each kind.")]
 pub type KindGlobs = { code: [String], docs: [String], infra: [String], data: [String] }
 
-#[doc("What `.kimun.toml` says that `loc` reads.")]
+#[doc("What `.kimun.toml` says that the ported commands read.")]
 pub type Config = {
   exclude_dirs: [String],
   exclude_extensions: [String],
   exclude_patterns: [String],
-  kinds: KindGlobs
+  kinds: KindGlobs,
+  separate: Bool,
+  active_days: Option[Int],
+  frozen_days: Option[Int]
 }
 
 #[doc("The configuration of a project without `.kimun.toml`.")]
@@ -24,7 +27,10 @@ pub const DEFAULT : Config = Config {
   exclude_dirs: [],
   exclude_extensions: [],
   exclude_patterns: [],
-  kinds: KindGlobs { code: [], docs: [], infra: [], data: [] }
+  kinds: KindGlobs { code: [], docs: [], infra: [], data: [] },
+  separate: false,
+  active_days: None,
+  frozen_days: None
 }
 
 type Table = [Pair[String, TomlValue]]
@@ -100,6 +106,23 @@ fn texts(root: Table, section: String, key: String) : [String] =
     _ -> []
   }
 
+fn value(root: Table, section: String, key: String) : Option[TomlValue] =
+  match toml.pairs_get(root, section) {
+    Some(TTbl(ps)) -> toml.pairs_get(ps, key)
+    _ -> None
+  }
+
+fn count(root: Table, section: String, key: String) : Option[Int] =
+  match value(root, section, key) {
+    Some(TInt(n)) -> Some(n)
+    _ -> None
+  }
+
+fn flag(root: Table, section: String, key: String) : Bool = match value(root, section, key) {
+  Some(TBool(b)) -> b
+  _ -> false
+}
+
 fn of_table(root: Table) : Config =
   Config {
     exclude_dirs: texts(root, "exclude", "dirs"),
@@ -110,7 +133,10 @@ fn of_table(root: Table) : Config =
       docs: texts(root, "kinds", "docs"),
       infra: texts(root, "kinds", "infra"),
       data: texts(root, "kinds", "data")
-    }
+    },
+    separate: flag(root, "kinds", "separate"),
+    active_days: count(root, "age", "active_days"),
+    frozen_days: count(root, "age", "frozen_days")
   }
 
 #[doc("Reads a configuration's text: `None` when it is not TOML or a value has the wrong type.")]

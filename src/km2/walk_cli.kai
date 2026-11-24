@@ -1,0 +1,211 @@
+# What every command that walks files shares with `loc`: the path, the
+# output format, the filters, `--kind`, and `--list-excluded`.
+
+import ahu.cli
+import path
+import km2.config
+import km2.config.{Config}
+import km2.glob
+import km2.glob.{Glob}
+import km2.kinds
+import km2.kinds.{Kind, Selection, Declared, KCode, KDocs, KInfra, KData}
+import km2.rust_tests
+import km2.selection
+import km2.selection.{Filter}
+import km2.sources
+import km2.walk
+
+pub const FORMATS : [String] =
+  ["table", "json", "short", "terse", "github", "codeclimate", "gitlab"]
+
+pub fn compiled(patterns: [String], warn: (String, String) -> String) : [Glob] / Stderr =
+  patterns
+    || (p => match glob.compile(p, false) {
+      Ok(g) -> [g]
+      Err(e) -> {
+        Stderr.eprint(warn(p, e))
+        []
+      }
+    })
+
+fn exclude_warning(p: String, e: String) : String = "warning: invalid glob '#{p}': #{e}"
+
+fn kind_warning(p: String, e: String) : String = "warning: invalid glob '#{p}' in [kinds]: #{e}"
+
+fn declared(c: Config) : [Declared] / Stderr =
+  [(KCode, c.kinds.code), (KDocs, c.kinds.docs), (KInfra, c.kinds.infra), (KData, c.kinds.data)]
+    || (d => {
+      let (k, patterns) = d
+      if patterns == [] {
+        []
+      } else {
+        [Declared { kind: k, globs: compiled(patterns, kind_warning) }]
+      }
+    })
+
+fn chosen_kinds(values: [String]) : Result[Option[[Kind]], String] =
+  if values == [] {
+    Ok(None)
+  } else {
+    let parts = values || (v => string.split(v, ","))
+    match list.find(parts, p => kinds.parse(p) == None) {
+      Some(bad) -> Err(
+        "invalid value '#{bad}' for '--kind <KIND>' [possible values: code, docs, infra, data, all]"
+      )
+      None ->
+        Ok(Some(kinds.ALL |? (k => list.any(parts, p => list.contains(kinds.parse(p) ?? [], k)))))
+    }
+  }
+
+#[doc("The arguments every walking command takes.")]
+pub type Common = {
+  root: String,
+  format: String,
+  exclude_tests: Bool,
+  filter: Filter,
+  selection: Selection,
+  list_excluded: Bool
+}
+
+#[doc("The common arguments of a command line, with `.kimun.toml`'s exclusions and kinds.")]
+pub fn common(c: cli.Context, cfg: Config) : Result[Common, String] / Stderr {
+  let include = cli.texts(c, "include-ext")
+  let exclude = cli.texts(c, "exclude-ext")
+  let chosen = chosen_kinds(cli.texts(c, "kind"))!
+  let filter = Filter {
+    include_ext: selection.normalized(include),
+    exclude_ext: selection.normalized(exclude ++ cfg.exclude_extensions),
+    exclude_dirs: cli.texts(c, "exclude-dir") ++ cfg.exclude_dirs,
+    globs: compiled(cli.texts(c, "exclude") ++ cfg.exclude_patterns, exclude_warning)
+  }
+  Ok(Common {
+    root: cli.argument(c, "PATH") ?? ".",
+    format: cli.text(c, "format") ?? "table",
+    exclude_tests: not cli.boolean(c, "include-tests"),
+    filter: filter,
+    selection: Selection { chosen: chosen, declared: declared(cfg) },
+    list_excluded: cli.boolean(c, "list-excluded")
+  })
+}
+
+fn ancestor_reason(o: Common, p: String) : [String] {
+  let dirs = string.split(path.dirname(p), "/") |? (d => d != "" and d != "." and d != "..")
+  match list.find(
+    dirs,
+    d => list.contains(o.filter.exclude_dirs, d)
+      or (o.exclude_tests and selection.is_non_production_dir(d))
+  ) {
+    None -> []
+    Some(d) ->
+      if list.contains(o.filter.exclude_dirs, d) {
+        ["directory"]
+      } else if selection.is_test_dir(d) {
+        ["test directory"]
+      } else {
+        ["example or benchmark directory"]
+      }
+  }
+}
+
+fn kind_reason(o: Common, p: String) : [String] / File = match sources.language(p) {
+  None -> []
+  Some(spec) -> {
+    let k = kinds.of(o.selection, p, selection.relative(o.root, p), spec.name, spec.is_code)
+    if kinds.reads(o.selection, k) { [] } else { ["kind #{kinds.name(k)}"] }
+  }
+}
+
+fn reasons(o: Common, modules: [String], p: String) : [String] / File =
+  (if o.exclude_tests and selection.is_test_file(p) { ["test file"] } else { [] })
+    ++ (if selection.excludes_by_extension(o.filter, p) { ["extension"] } else { [] })
+    ++ ancestor_reason(o, p)
+    ++ (if selection.excludes_by_glob(o.filter, o.root, p) { ["glob"] } else { [] })
+    ++ (if rust_tests.in_test_module(p, modules) { ["test module"] } else { [] })
+    ++ kind_reason(o, p)
+
+#[doc("`--list-excluded`: the files the filters leave out, each with its reasons, and their count.")]
+pub fn list_excluded(o: Common) : String / File + Env {
+  let everything = walk.files(o.root, false, selection.EMPTY).files
+  let modules = if o.exclude_tests {
+    sources.test_modules(
+      sources.files(o.root, false, selection.EMPTY, Selection { chosen: None, declared: [] }).sources
+    )
+  } else {
+    []
+  }
+  let lines = everything
+    || (p => match reasons(o, modules, p) {
+      [] -> []
+      rs -> ["#{selection.relative(o.root, p)} (#{string.join(rs, ", ")})"]
+    })
+  string.join([...lines, "", "#{list.length(lines)} file(s) excluded"], "\n")
+}
+
+#[doc("The warning km gives once when the repository is a shallow clone.")]
+pub const SHALLOW : String =
+  "warning: shallow clone: the history stops at the commits fetched, so commit counts, authors and ages read from it are short (git fetch --unshallow)"
+
+#[doc("A command with the path argument and the options every walking command takes.")]
+pub fn with_common[e](cmd: cli.Command[e]) : cli.Command[e] =
+  cmd
+    |> cli.with_argument(
+      cli.argument_with_default("PATH", "Directory to analyze (default: current directory)", ".")
+    )
+    |> cli.with_option(
+      cli.text_option_with_default(
+        "format",
+        "Output format",
+        "table"
+      )
+        |> cli.value_name("FORMAT")
+        |> cli.choices(FORMATS)
+    )
+    |> cli.with_option(
+      cli.boolean_option(
+        "include-tests",
+        "Include tests, examples and benchmarks in analysis (excluded by default)"
+      )
+    )
+    |> cli.with_option(
+      cli.text_list_option(
+        "include-ext",
+        "Only include files with these extensions (case-insensitive, leading dot optional). Repeatable"
+      )
+        |> cli.value_name("EXT")
+        |> cli.conflicts_with("exclude-ext")
+    )
+    |> cli.with_option(
+      cli.text_list_option(
+        "exclude-ext",
+        "Exclude files by extension, case-insensitive (leading dot optional). Repeatable"
+      )
+        |> cli.value_name("EXT")
+    )
+    |> cli.with_option(
+      cli.text_list_option(
+        "exclude-dir",
+        "Exclude directories by exact name (case-sensitive), at any depth. Repeatable"
+      )
+        |> cli.value_name("DIR")
+    )
+    |> cli.with_option(
+      cli.text_list_option(
+        "exclude",
+        "Exclude files matching a glob pattern against the path relative to the analysis root. Repeatable"
+      )
+        |> cli.short("E")
+        |> cli.value_name("PATTERN")
+    )
+    |> cli.with_option(
+      cli.text_list_option(
+        "kind",
+        "Read only files of these kinds: code, docs, infra, data or all. Repeatable or comma-separated"
+      )
+        |> cli.value_name("KIND")
+    )
+    |> cli.with_option(
+      cli.boolean_option(
+        "list-excluded",
+        "Print files that would be excluded by the current filter and exit"
+      )
+    )
