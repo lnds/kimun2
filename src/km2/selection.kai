@@ -112,7 +112,8 @@ pub fn excludes_by_extension(f: Filter, p: String) : Bool =
 
 #[doc("A path relative to the walk's root, as globs are matched against it.")]
 pub fn relative(root: String, p: String) : String {
-  let base = if root == "." { "./" } else { root ++ "/" }
+  let base =
+    if root == "." { "./" } else if string.ends_with(root, "/") { root } else { root ++ "/" }
   string.drop_prefix(p, base) ?? p
 }
 

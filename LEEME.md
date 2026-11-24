@@ -4,7 +4,7 @@ Métricas de código sobre árboles de sintaxis: el sucesor de [km (Kimün)](htt
 
 km2 apunta a reemplazar a `km` sin cambios para quien lo usa: los mismos comandos, flags, formatos de salida, esquema JSON y `.kimun.toml`, con mejores mediciones donde un árbol de sintaxis ve lo que una lectura léxica no alcanza. Hasta llegar a la paridad, `km` sigue siendo la herramienta a usar.
 
-Estado: `loc`, `churn`, `age` y `authors` están portados, con todas las opciones y formatos de sus pares en `km`. Los demás comandos todavía no están implementados.
+Estado: `loc`, `indent`, `churn`, `age` y `authors` están portados, con todas las opciones y formatos de sus pares en `km`. Los demás comandos todavía no están implementados.
 
 ## Compilación
 
@@ -32,7 +32,6 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 
 | Comportamiento | km | km2 | Aguas arriba |
 |---|---|---|---|
-| Formato del JSON | con sangría | compacto (mismo contenido) | lnds/kaikai#3521 |
 | Una línea cuyo único contenido es un byte UTF-8 inválido que kaikai decodifica como espacio (un `0x85` suelto, un `0xE9` truncado) | código | en blanco | lnds/kaikai#3555 |
 | Un comando que falla (`--since 6x`, una ruta fuera de un repositorio) | `error: ...` | `Error: ...` | kaikailang-org/ahu#47 |
 | `churn`, `age`: un renombre cerca del umbral de similitud del 50 % | lo sigue según puntúa libgit2 | lo sigue según puntúa `git log -M` | km2 lee la historia con el programa `git`; kaikai no tiene enlace a libgit2. En `lnds/kaikai`, difieren 5 de 879 archivos. |
@@ -41,3 +40,4 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 | Un archivo que no se puede leer | `<ruta>: Permission denied (os error 13)` | `<ruta>: read_file: cannot open file` | lnds/kaikai#3535 |
 | Un elemento desconocido en un `--kind` separado por comas (`code,nope`) | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#45 |
 | Reconocer archivos generados por un source map nombrado al final | lee los últimos 512 bytes | lee el archivo completo (mismo resultado, más lectura) | lnds/kaikai#3562 |
+| `indent` sobre un archivo de texto con un byte UTF-8 de continuación suelto (algunas fuentes Latin-1) | lo mide | se detiene con un pánico de `string.slice` | lnds/kaikai#3565 |

@@ -40,23 +40,30 @@ fn line_of(out: Option[String]) : Option[String] = out |> option.map(string.trim
 #[doc("Where a directory sits in its repository: the working tree, and the directory's path within it.")]
 pub type Repo = { work_tree: String, prefix: String }
 
+fn located(root: String) : Result[Repo, String] / Process =
+  match run(["-C", root, "rev-parse", "--is-bare-repository", "--show-toplevel", "--show-prefix"]) {
+    Some(out) -> match string.lines(out) {
+      ["false", top, prefix, ..._] ->
+        Ok(Repo { work_tree: top, prefix: string.drop_suffix(prefix, "/") ?? prefix })
+      ["false", top] -> Ok(Repo { work_tree: top, prefix: "" })
+      _ -> Err("could not find repository at '#{root}'; class=Repository (6); code=NotFound (-3)")
+    }
+    None ->
+      if line_of(run(["-C", root, "rev-parse", "--is-bare-repository"])) == Some("true") {
+        Err("bare repositories are not supported")
+      } else {
+        Err("could not find repository at '#{root}'; class=Repository (6); code=NotFound (-3)")
+      }
+  }
+
 #[doc("The repository holding `root`, or km's message for why there is none.")]
 pub fn discover(root: String) : Result[Repo, String] / File + Process =
   if not file.exists(root) {
     Err(
       "failed to resolve path '#{root}': No such file or directory; class=Os (2); code=NotFound (-3)"
     )
-  } else if line_of(run(["-C", root, "rev-parse", "--is-bare-repository"])) == Some("true") {
-    Err("bare repositories are not supported")
   } else {
-    match (
-      line_of(run(["-C", root, "rev-parse", "--show-toplevel"])),
-      line_of(run(["-C", root, "rev-parse", "--show-prefix"]))
-    ) {
-      (Some(top), Some(prefix)) ->
-        Ok(Repo { work_tree: top, prefix: string.drop_suffix(prefix, "/") ?? prefix })
-      _ -> Err("could not find repository at '#{root}'; class=Repository (6); code=NotFound (-3)")
-    }
+    located(root)
   }
 
 #[doc("Whether the repository is a shallow clone.")]

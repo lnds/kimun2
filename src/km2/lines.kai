@@ -106,6 +106,10 @@ fn fold_kinds(spec: Spec, src: String, acc: a, f: (a, LineKind) -> a) : a {
 pub fn tally(spec: Spec, src: String) : Tally =
   fold_kinds(spec, src, Tally { blank: 0, comment: 0, code: 0 }, count)
 
+#[doc("The kind of each of a source's lines, split already and without its byte order mark.")]
+pub fn kinds_of_lines(spec: Spec, text_lines: [String]) : [LineKind] =
+  fold_lines(scan.lexer(spec), text_lines, 0, StNormal, [], (acc, k) => [k, ...acc]) |> list.reverse
+
 #[doc("The kind of every line of a source, in order, byte order mark aside.")]
 pub fn kinds(spec: Spec, src: String) : [LineKind] =
   fold_kinds(spec, src, [], (acc, k) => [k, ...acc]) |> list.reverse

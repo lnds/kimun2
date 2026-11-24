@@ -1,0 +1,348 @@
+# `indent`: how deeply each source file nests its code, read from the
+# indentation of its code lines as structure, not layout.
+
+import ahu.cli
+import fs.file
+import math.real
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
+import text
+import km2.churn
+import km2.code_text
+import km2.generated
+import km2.git
+import km2.history_report
+import km2.languages
+import km2.languages.spec.{Spec}
+import km2.lexical.bytes
+import km2.lines
+import km2.lines.{LineKind, Blank, Code}
+import km2.rust_tests
+import km2.selection
+import km2.sources.{Source}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+# What a line sits inside: the brackets opened on a line of some depth,
+# or a block.
+type Open = IndentParen(Int) | IndentBlock
+
+type Statements = { stack: [Open], base: Int, continues: Bool }
+
+const TRAILING_OPERATORS : [String] = ["::", "&&", "||", "\\", "|>", "|"]
+
+const LEADING_OPERATORS : [String] = [".", "|", "&&", "||"]
+
+fn ends_with_operator(t: String) : Bool =
+  list.any(TRAILING_OPERATORS, op => string.ends_with(t, op))
+
+fn starts_with_operator(t: String) : Bool =
+  list.any(LEADING_OPERATORS, op => string.starts_with(t, op)) and (not string.starts_with(t, ".."))
+
+fn closes_block(t: String) : Bool =
+  t == "end" or string.starts_with(t, "end ") or string.starts_with(t, "end)")
+
+fn opens_block(t: String) : Bool =
+  t == "do" or string.ends_with(t, " do") or string.ends_with(t, "->") or string.ends_with(t, "=>")
+
+fn is_paren(o: Open) : Bool = match o {
+  IndentParen(_) -> true
+  IndentBlock -> false
+}
+
+# The stack without its innermost entry `is_match` takes and all above
+# it; unchanged when there is none.
+fn pop_until(stack: [Open], is_match: (Open) -> Bool) : [Open] = match list.drop_while(
+  stack,
+  o => not is_match(o)
+) {
+  [] -> stack
+  [_, ...below] -> below
+}
+
+fn lower(a: Int, b: Int) : Int = if a < b { a } else { b }
+
+fn depth_of(s: Statements, raw: Int, t: String) : (Int, Statements) {
+  let stack = if raw == 0
+    and (not (string.starts_with(t, ")") or string.starts_with(t, "]") or string.starts_with(t, "}"))) {
+    []
+  } else {
+    s.stack
+  }
+  let here = Statements { ...s, stack: stack }
+  match stack {
+    [IndentParen(opener), ..._] -> (lower(raw, opener + 1), here)
+    _ ->
+      if s.continues or starts_with_operator(t) {
+        (lower(raw, s.base + 1), here)
+      } else {
+        (raw, Statements { ...here, base: raw })
+      }
+  }
+}
+
+fn bracket(stack: [Open], b: Int, depth: Int) : [Open] = match b {
+  40 -> [IndentParen(depth), ...stack]
+  91 -> [IndentParen(depth), ...stack]
+  123 -> [IndentBlock, ...stack]
+  41 -> pop_until(stack, is_paren)
+  93 -> pop_until(stack, is_paren)
+  125 -> pop_until(stack, o => not is_paren(o))
+  _ -> stack
+}
+
+fn is_bracket(b: Int) : Bool = b == 40 or b == 41 or b == 91 or b == 93 or b == 123 or b == 125
+
+fn next_bracket(t: String, i: Int, n: Int) : Int =
+  if i < n and (not is_bracket(bytes.byte(t, i))) { next_bracket(t, i + 1, n) } else { i }
+
+fn brackets(t: String, i: Int, n: Int, stack: [Open], depth: Int) : [Open] {
+  let j = next_bracket(t, i, n)
+  if j >= n { stack } else { brackets(t, j + 1, n, bracket(stack, bytes.byte(t, j), depth), depth) }
+}
+
+fn read_line(s: Statements, t: String, depth: Int) : Statements {
+  let bracketed = brackets(t, 0, string.byte_length(t), s.stack, depth)
+  let stack = if closes_block(t) {
+    pop_until(bracketed, o => not is_paren(o))
+  } else if opens_block(t) {
+    [IndentBlock, ...bracketed]
+  } else {
+    bracketed
+  }
+  Statements { ...s, stack: stack, continues: ends_with_operator(t) }
+}
+
+#[doc("The depth of each code line as structure: a line that continues a statement (inside brackets, after a trailing operator, or starting with one) is at most one level deeper than the line it continues.")]
+pub fn structural_depths(code: [String]) : [Int] {
+  let start = (Statements { stack: [], base: 0, continues: false }, [])
+  let (_, depths) = code
+    |> list.foldl(start, (acc, line) => {
+      let (s, ds) = acc
+      let t = code_text.of(line)
+      let (d, at) = depth_of(s, code_text.indent_depth(line), t)
+      (read_line(at, t, d), [d, ...ds])
+    })
+  list.reverse(depths)
+}
+
+#[doc("How evenly a file is indented: under 1 Low, under 1.5 Moderate, under 2 High, else Very High; files of fewer than ten code lines are ungraded.")]
+pub type Complexity = IndentLow | IndentModerate | IndentHigh | IndentVeryHigh | IndentUngraded
+
+fn complexity_of(stddev: Real, n: Int) : Complexity =
+  if n < 10 {
+    IndentUngraded
+  } else if stddev < 1.0 {
+    IndentLow
+  } else if stddev < 1.5 {
+    IndentModerate
+  } else if stddev < 2.0 {
+    IndentHigh
+  } else {
+    IndentVeryHigh
+  }
+
+fn label(c: Complexity) : String = match c {
+  IndentLow -> "Low"
+  IndentModerate -> "Moderate"
+  IndentHigh -> "High"
+  IndentVeryHigh -> "Very High"
+  IndentUngraded -> "-"
+}
+
+fn json_label(c: Complexity) : String = match c {
+  IndentLow -> "low"
+  IndentModerate -> "moderate"
+  IndentHigh -> "high"
+  IndentVeryHigh -> "very_high"
+  IndentUngraded -> "ungraded"
+}
+
+#[doc("A file's indentation: its code lines, the standard deviation and the maximum of their depths.")]
+pub type FileIndent = {
+  path: String,
+  code_lines: Int,
+  stddev: Real,
+  max_depth: Int,
+  complexity: Complexity
+}
+
+#[doc("The sample standard deviation of the values, zero for fewer than two.")]
+pub fn stddev(values: [Int]) : Real {
+  let n = int_to_real(list.length(values))
+  if n <= 1.0 {
+    0.0
+  } else {
+    let mean = int_to_real(values |> list.foldl(0, (a, v) => a + v)) / n
+    let squares = values
+      |> list.foldl(0.0, (a, v) => {
+        let d = int_to_real(v) - mean
+        a + d * d
+      })
+    real_sqrt(squares / (n - 1.0))
+  }
+}
+
+fn code_lines(text_lines: [String], kinds: [LineKind], acc: [String]) : [String] =
+  match (text_lines, kinds) {
+    ([line, ...lines], [Code, ...ks]) -> code_lines(lines, ks, [line, ...acc])
+    ([_, ...lines], [_, ...ks]) -> code_lines(lines, ks, acc)
+    _ -> list.reverse(acc)
+  }
+
+#[doc("The indentation of a file from its lines and their kinds; none when it has no code line.")]
+pub fn analyze(path: String, text_lines: [String], kinds: [LineKind]) : Option[FileIndent] {
+  let code = code_lines(text_lines, kinds, [])
+  match structural_depths(code) {
+    [] -> None
+    depths -> {
+      let sd = stddev(depths)
+      let n = list.length(depths)
+      Some(FileIndent {
+        path: path,
+        code_lines: n,
+        stddev: sd,
+        max_depth: depths |> list.foldl(0, (m, d) => if d > m { d } else { m }),
+        complexity: complexity_of(sd, n)
+      })
+    }
+  }
+}
+
+fn masked(kinds: [LineKind], blocks: [(Int, Int)]) : [LineKind] =
+  if blocks == [] {
+    kinds
+  } else {
+    list.enumerate(kinds)
+      | (p => {
+        let (i, k) = p
+        if list.any(blocks, b => i >= b.fst and i <= b.snd) { Blank } else { k }
+      })
+  }
+
+#[doc("A source's lines and their kinds as km's analyses read them: without the inline Rust test blocks when tests are left out.")]
+pub fn classified(spec: Spec, src: String, exclude_tests: Bool) : ([String], [LineKind]) {
+  let text_lines = string.lines(string.drop_prefix(src, "\u{FEFF}") ?? src)
+  let kinds = lines.kinds_of_lines(spec, text_lines)
+  if exclude_tests and spec.name == "Rust" {
+    (text_lines, masked(kinds, rust_tests.test_blocks(src)))
+  } else {
+    (text_lines, kinds)
+  }
+}
+
+# Reports.
+
+fn path_width(files: [FileIndent]) : Int =
+  files
+    |> list.foldl(4, (w, f) => {
+      let n = text.display_width(f.path)
+      if n > w { n } else { w }
+    })
+
+#[doc("The table of `km indent`.")]
+pub fn table(files: [FileIndent]) : String =
+  if files == [] {
+    "No recognized source files found."
+  } else {
+    let w = path_width(files)
+    let rule = history_report.rule(if w + 42 > 68 { w + 42 } else { 68 })
+    let l = history_report.left
+    let r = history_report.right
+    let rows = files
+      | (f => " #{l(f.path, w)} #{r("#{f.code_lines}", 8)} #{r(real.to_fixed(f.stddev, 2), 6)} #{r("#{f.max_depth}", 5)}  #{label(f.complexity)}")
+    [
+      rule,
+      " #{l("File", w)} #{r("Lines", 8)} #{r("StdDev", 6)} #{r("Max", 5)}  Complexity",
+      rule,
+      ...rows,
+      rule,
+      "",
+      " Complexity based on indentation stddev (Adam Tornhill,",
+      " \"Your Code as a Crime Scene\", Ch.6). Thresholds are heuristic."
+    ]
+      |> string.join("\n")
+  }
+
+fn entry(f: FileIndent) : JsonValue =
+  JObj([
+    ("path", JStr(f.path)),
+    ("code_lines", JNum(f.code_lines)),
+    ("indent_stddev", JReal(f.stddev)),
+    ("indent_max", JNum(f.max_depth)),
+    ("complexity", JStr(json_label(f.complexity)))
+  ])
+
+#[doc("The JSON of `km indent`: one entry per file.")]
+pub fn to_json(files: [FileIndent]) : String = json.json_encode_pretty(JArr(files | entry), 2)
+
+fn average(files: [FileIndent]) : Real =
+  if files == [] {
+    0.0
+  } else {
+    (files |> list.foldl(0.0, (a, f) => a + f.stddev)) / int_to_real(list.length(files))
+  }
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(files: [FileIndent]) : String {
+  let max_sd = files |> list.foldl(0.0, (m, f) => real.max(m, f.stddev))
+  let depth = files |> list.foldl(0, (m, f) => if f.max_depth > m { f.max_depth } else { m })
+  "indent files:#{list.length(files)} avg_sd:#{real.to_fixed(average(files), 2)} max_sd:#{real.to_fixed(max_sd, 2)} max_depth:#{depth}"
+}
+
+# The command.
+
+#[doc("A walked file's path as km's reports show it: from the root of the repository holding the analyzed path, else from that path.")]
+pub fn shown(repo: Option[git.Repo], root: String, p: String) : String = match repo {
+  Some(r) -> history_report.git_path(r, root, p)
+  None -> selection.relative(root, p)
+}
+
+fn measure(w: Common, repo: Option[git.Repo], s: Source) : [FileIndent] / File + Stderr =
+  match file.read(s.path) {
+    Err(e) -> {
+      Stderr.eprint("warning: #{s.path}: #{e}")
+      []
+    }
+    Ok(src) ->
+      if bytes.is_binary(src) or generated.is_generated_text(s.path, src) {
+        []
+      } else {
+        let spec = languages.refine(s.path, s.spec, src)
+        let (text_lines, kinds) = classified(spec, src, w.exclude_tests)
+        match analyze(shown(repo, w.root, s.path), text_lines, kinds) {
+          Some(f) -> [f]
+          None -> []
+        }
+      }
+  }
+
+fn render(format: String, files: [FileIndent]) : Result[Unit, String] / Stdout = match format {
+  "json" -> Ok(Stdout.print(to_json(files)))
+  "short" -> Ok(Stdout.print(short(files)))
+  "terse" -> Ok(Stdout.print(real.to_fixed(average(files), 2)))
+  "table" -> Ok(Stdout.print(table(files)))
+  _ -> Err(history_report.CI_FORMAT_ONLY)
+}
+
+fn run_indent(
+  c: cli.Context
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock =
+  walk_cli.walking(c, (cfg, w) => {
+    let repo = ok(git.discover(w.root))
+    let files = churn.measured_files(w, cfg.separate)
+      || (s => measure(w, repo, s))
+      |> list.sort_by(
+        (a, b) => if a.stddev > b.stddev { -1 } else if a.stddev < b.stddev { 1 } else { 0 }
+      )
+    render(w.format, files)
+  })
+
+#[doc("The `indent` command, with `km indent`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+  cli.command(
+    "indent",
+    "Analyze indentation complexity (stddev and max depth per file)",
+    run_indent
+  )
+    |> walk_cli.with_common

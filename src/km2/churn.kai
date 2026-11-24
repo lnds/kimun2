@@ -155,12 +155,13 @@ pub fn short(files: [FileChurn]) : String {
 
 # The command.
 
+#[doc("The source files of the kinds the metrics of code measure.")]
+pub fn measured_files(w: Common, separate: Bool) : [Source] / File + Env + Stderr =
+  walk_cli.walked_sources(w) |? (s => kinds.measures(w.selection, s.kind, s.spec.is_code, separate))
+
 #[doc("The source files the metrics of code read: of the kinds they measure, without generated files.")]
-pub fn code_files(w: Common, separate: Bool) : [Source] / File + Env + Stderr {
-  walk_cli.walked_sources(w)
-    |? (s => kinds.measures(w.selection, s.kind, s.spec.is_code, separate))
-    |? (s => not generated.is_generated(s.path))
-}
+pub fn code_files(w: Common, separate: Bool) : [Source] / File + Env + Stderr =
+  measured_files(w, separate) |? (s => not generated.is_generated(s.path))
 
 fn render(format: String, files: [FileChurn], shown: Int) : Result[Unit, String] / Stdout =
   match format {

@@ -1,0 +1,10 @@
+indent ../kimun/src
+indent --format json ../kimun/src
+indent --format short ../kimun
+indent --format terse ../kimun
+indent --include-tests --format json ../kimun/src
+indent --format json ../kaikai/stdlib
+indent --format json fixtures/lang
+indent fixtures/empty
+indent .
+indent fixtures/lang/

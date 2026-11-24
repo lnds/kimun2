@@ -34,27 +34,9 @@ km2 builds on the kaikai ecosystem first, and writes its own only what the ecosy
 
 Each is pinned to a release tag in `kai.toml` and added when the first module uses it, never before. A bug in one of them is reported upstream with a repro, not patched here.
 
-## Layout
+## Commands
 
-```
-src/
-  main.kai          entry point
-  km2/              `src/km2/<dir>/<file>.kai` imports as `km2.<dir>.<file>`
-    *.kai           the edges: CLI, file walk, git, output
-    ts.kai          FFI bindings (the only module with `Ffi`)
-    syntax.kai      the tree API
-    metrics/        pure metric logic
-c/                  the shim (`kts.c`, `kts.h`)
-queries/<lang>/     tree-sitter queries per language
-vendor/             tree-sitter core and grammars; `vendor/VERSIONS` pins them
-scripts/vendor.sh   the only way `vendor/` changes
-bench/              `compare.sh` (km vs km2, time and peak RSS) and `results.md`
-tests/              kaikai tests, one `*_test.kai` per module; differential tests against km
-fixtures/<lang>/    inputs with expected results
-tools/              repo scripts: the quality gate
-```
-
-`make ci` is everything CI runs: format, lint, build, tests, the quality gate with `km` and with `km2`, and the differential tests against `km`. The kaikai version is pinned in `.kaikai-version` (0.199.2).
+`make ci` is everything CI runs: format, lint, build, tests, the quality gate with `km` and with `km2`, and the differential tests against `km`. The kaikai version is pinned in `.kaikai-version`.
 
 ## Principles
 

@@ -4,7 +4,7 @@ Code metrics over syntax trees: the successor of [km (Kimün)](https://github.co
 
 km2 aims to be a drop-in replacement for `km`: the same commands, flags, output formats, JSON schema and `.kimun.toml`, with better measurements wherever a syntax tree sees what a lexical reader cannot. Until it reaches parity, `km` remains the tool to use.
 
-Status: `loc`, `churn`, `age` and `authors` are ported, with every flag and format of their `km` counterparts. The other commands are not implemented yet.
+Status: `loc`, `indent`, `churn`, `age` and `authors` are ported, with every flag and format of their `km` counterparts. The other commands are not implemented yet.
 
 ## Building
 
@@ -32,7 +32,6 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 
 | Behaviour | km | km2 | Upstream |
 |---|---|---|---|
-| JSON layout | indented | compact (same content) | lnds/kaikai#3521 |
 | A line whose only content is an invalid UTF-8 byte that kaikai decodes as whitespace (a stray `0x85`, a truncated `0xE9`) | code | blank | lnds/kaikai#3555 |
 | A command that fails (`--since 6x`, a path outside a repository) | `error: ...` | `Error: ...` | kaikailang-org/ahu#47 |
 | `churn`, `age`: a rename near the 50% similarity threshold | followed as libgit2 scores similarity | followed as `git log -M` scores it | km2 reads history through the `git` program; kaikai has no libgit2 binding. On `lnds/kaikai`, 5 of 879 files differ. |
@@ -41,3 +40,4 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 | A file that cannot be read | `<path>: Permission denied (os error 13)` | `<path>: read_file: cannot open file` | lnds/kaikai#3535 |
 | An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |
 | Telling generated files by a source map named at their end | reads the last 512 bytes | reads the whole file (same result, more I/O) | lnds/kaikai#3562 |
+| `indent` over a text file with a stray UTF-8 continuation byte (some Latin-1 sources) | measures it | stops with a `string.slice` panic | lnds/kaikai#3565 |

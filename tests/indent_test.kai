@@ -1,0 +1,98 @@
+import km2.indent
+import km2.lines.{Blank, Code}
+
+fn depths(code: [String]) : [Int] = indent.structural_depths(code)
+
+test "aligned arguments are one level deeper than their call" {
+  let code = [
+    "int load(const char *path) {",
+    "    if (!f) {",
+    "        return report(\"Could not open %s (flags %d)\",",
+    "                                          path,",
+    "                                          flags);",
+    "    }",
+    "    return 0;",
+    "}"
+  ]
+  assert depths(code) == [0, 1, 2, 3, 3, 1, 1, 0]
+}
+
+test "block-style parameters keep their depth" {
+  let code = [
+    "fn f(",
+    "    a: u32,",
+    "    b: u32,",
+    ") -> u32 {",
+    "    if a > b {",
+    "        a",
+    "    } else {",
+    "        b",
+    "    }",
+    "}"
+  ]
+  assert depths(code) == [0, 1, 1, 0, 1, 2, 1, 2, 1, 0]
+}
+
+test "a closure inside a call nests again" {
+  let code = [
+    "describe('x', () => {",
+    "    it('y', () => {",
+    "        if (a) {",
+    "            b();",
+    "        }",
+    "    });",
+    "});"
+  ]
+  assert depths(code) == [0, 1, 2, 3, 2, 1, 0]
+}
+
+test "an Elixir fn inside a call nests again" {
+  let code = [
+    "Enum.map(list, fn x ->",
+    "    case x do",
+    "        1 -> :one",
+    "        _ -> :other",
+    "    end",
+    "end)"
+  ]
+  assert depths(code) == [0, 1, 2, 2, 1, 0]
+}
+
+test "lines after or starting with an operator continue the statement" {
+  let code = [
+    "defmodule Serializer do",
+    "  @callback encode!(term()) ::",
+    "              {:push, :text, iodata()}",
+    "              | {:push, :binary, iodata()}",
+    "end"
+  ]
+  assert depths(code) == [0, 0, 1, 1, 0]
+}
+
+test "method chains continue the statement" {
+  let code = [
+    "let v = items",
+    "                .iter()",
+    "                .map(f)",
+    "                .collect();",
+    "let w = 1;"
+  ]
+  assert depths(code) == [0, 1, 1, 1, 0]
+}
+
+test "brackets in literals and comments count for nothing" {
+  let code = ["fn f() {", "    let s = \"(((\"; // ((", "    let c = '(';", "    g();", "}"]
+  assert depths(code) == [0, 1, 1, 1, 0]
+}
+
+test "the sample standard deviation, zero below two values" {
+  assert indent.stddev([]) == 0.0
+  assert indent.stddev([3]) == 0.0
+  assert indent.stddev([1, 3]) > 1.41
+  assert indent.stddev([1, 3]) < 1.42
+}
+
+test "a file without code lines has no indentation" {
+  assert indent.analyze("a", ["// x", ""], [Blank, Blank]) == None
+  assert indent.analyze("a", ["x"], [Code]) != None
+}

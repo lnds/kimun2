@@ -146,3 +146,22 @@ pub fn in_test_module(p: String, modules: [String]) : Bool =
     }
     p == m or string.starts_with(p, d ++ "/")
   })
+
+fn block_ranges(code: [String], i: Int, acc: [(Int, Int)]) : [(Int, Int)] = match code {
+  [] -> list.reverse(acc)
+  [line, ...rest] ->
+    if string.starts_with(string.trim_left(line), "#[cfg(test)]") {
+      let end = item_end(code, i, i, Ends { braces: 0, parens: 0, where_clause: false })
+      block_ranges(list.drop(code, end - i + 1), end + 1, [(i, end), ...acc])
+    } else {
+      block_ranges(rest, i + 1, acc)
+    }
+}
+
+#[doc("The first and last line of each item under `#[cfg(test)]` in a Rust source, its attribute included; comments and literals do not count.")]
+pub fn test_blocks(src: String) : [(Int, Int)] =
+  if string.contains(src, "#[cfg(test)]") {
+    block_ranges(rust_literals.code_lines(src), 0, [])
+  } else {
+    []
+  }

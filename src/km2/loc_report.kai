@@ -143,7 +143,7 @@ pub fn to_json(r: Report) : String =
     ("kinds", named_json("kind", r.kinds)),
     ("totals", JObj(counts_json(total(r.languages | .snd))))
   ])
-    |> json.json_encode
+    |> (v => json.json_encode_pretty(v, 2))
 
 #[doc("The one-line summary of `--format short`.")]
 pub fn short(r: Report) : String {
@@ -215,7 +215,7 @@ pub fn authors_json(authors: [Author]) : String =
     ),
     ("totals", JObj(counts_json(total(authors | .counts))))
   ])
-    |> json.json_encode
+    |> (v => json.json_encode_pretty(v, 2))
 
 #[doc("The one-line summary of `--by-author --format short`.")]
 pub fn authors_short(authors: [Author]) : String {
