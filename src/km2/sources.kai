@@ -28,7 +28,7 @@ pub fn language(p: String) : Option[Spec] / File = match languages.by_name(p) {
   None -> match file.read(p) {
     Ok(src) -> {
       let line = first_line(src)
-      if utf8.is_valid(string.bytes(line)) { languages.by_shebang(line) } else { None }
+      if utf8.is_valid_string(line) { languages.by_shebang(line) } else { None }
     }
     Err(_) -> None
   }

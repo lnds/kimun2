@@ -4,7 +4,26 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `loc` over the language corpus, with ignore rules indexed by suffix (current)
+## `loc` over the language corpus, on kaikai 0.199.2 (current)
+
+`tools/corpus.sh run`, single warm runs. Output equals km's on 82 repositories. The other 2 are lnds/kaikai#3555: `trim` and `is_blank`, now Unicode-aware, read some invalid UTF-8 bytes as whitespace (a stray `0x85` as NEL, a truncated `0xE9` as TAB), so a Big5 file in helix-editor/helix and a one-byte Latin-1 JSON file in erlang/otp count lines as blank that km counts as code. WordPress and osiris, which differed through #3512, now match.
+
+Total: km 107.4 s, km2 103.1 s, 0.96×. 55 repositories at or below km's time, 27 between 1× and 1.5×, none above; microsoft/vcpkg 1.31×.
+
+Changes: the toolchain moves to 0.199.2 (`last_index_of` in one runtime call, `starts_with` / `ends_with` with one `memcmp`, short strings inside their cell); UTF-8 is validated over the `String` with `utf8.is_valid_string` instead of a `[Byte]` list; the content hash is the runtime's FNV-1a (`string.string_hash`) instead of a kaikai loop.
+
+| vcpkg, median of 5 warm runs | km | km2 on 0.198.0 | km2 on 0.199.2 |
+|---|---|---|---|
+| `loc` | 1.01 s | 1.39 s | 1.33 s |
+
+User CPU is still the gap on vcpkg (km2 0.86 s, km 0.44 s; system time 0.51 s and 0.58 s): freeing records, the lexer's per-step record, and field access.
+
+| Peak RSS, `/usr/bin/time -l` | km | km2 on 0.198.0 | km2 on 0.199.2 |
+|---|---|---|---|
+| a 522 KB C++ header (`stage0/runtime.h` with a `namespace` line) | 11.5 MB | 36.8 MB | 8.6 MB |
+| `kaikai` repository | 12.7 MB | 10.9 MB | 10.8 MB |
+
+## `loc` over the language corpus, with ignore rules indexed by suffix (superseded)
 
 `tools/corpus.sh run`, as below (a few repositories ran beside a microbenchmark, which slows km and km2 alike). Output equals km's on 81 repositories; the other 3 are lnds/kaikai#3512.
 
@@ -23,7 +42,7 @@ The gap on vcpkg is user CPU (km2 0.89 s, km 0.44 s); system time is the same (0
 
 What remains is kaikai's: `dir.list_entries` is a quarter of the walk; `string.last_index_of` (lnds/kaikai#3548) and `starts_with` / `ends_with` (#3553) copy a slice per call; the lexer allocates a record per step; and the per-file line list and FNV hash are kaikai loops. Computing a path's last component once for every frame instead of once per matcher was tried and gained nothing measurable.
 
-## Peak memory on the `kaikai` repository (current)
+## Peak memory on the `kaikai` repository (superseded)
 
 The 38 MB peak on the `kaikai` repository was one file: `stage0/runtime.h` (522 KB) took km2 to 35.9 MB on its own. Deciding whether a `.h` header is C or C++ checked that its text is valid UTF-8 first, through `utf8.is_valid(string.bytes(src))`, and `string.bytes` builds a list of one cell per byte (about 48 bytes of heap each, lnds/kaikai#3550). The check now runs only once a line only C++ writes is found; a C header never pays it.
 

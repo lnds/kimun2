@@ -21,15 +21,8 @@ import km2.sources
 import km2.sources.{Source}
 import km2.walk.{Unreadable}
 
-const FNV_OFFSET : Int = -3750763034362895579
-
-const FNV_PRIME : Int = 1099511628211
-
-fn fnv(s: String, i: Int, n: Int, h: Int) : Int =
-  if i >= n { h } else { fnv(s, i + 1, n, bit_xor(h, string.string_byte_at_int(s, i)) * FNV_PRIME) }
-
-#[doc("km's content hash: FNV-1a 64 over the raw bytes.")]
-pub fn content_hash(src: String) : Int = fnv(src, 0, string.byte_length(src), FNV_OFFSET)
+#[doc("A hash of the raw bytes (FNV-1a 64), to tell duplicate files apart.")]
+pub fn content_hash(src: String) : Int = string.string_hash(src)
 
 #[doc("The counts of one source in a language.")]
 pub fn count_source(spec: Spec, src: String) : Counts {
