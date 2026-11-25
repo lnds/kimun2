@@ -37,3 +37,26 @@ test "blanking keeps lines and blanks literals" {
   assert rust_literals.code_lines("let a = \"x\"; // c\nlet r = r#\"q\"#;\n")
     == ["let a = \" \";     ", "let r =   \" \" ;"]
 }
+
+test "an item ends where its braces balance, not inside a string, comment or char literal" {
+  assert rust_tests.test_blocks(
+    "fn a() {}\n#[cfg(test)]\nmod tests {\n  fn t() { let s = \"}\n{\"; }\n}\nfn b() {}\n"
+  )
+    == [(1, 5)]
+  assert rust_tests.test_blocks("/* x\n*/ #[cfg(test)]\nfn t() {\n  let c = '}';\n}\n") == [(1, 4)]
+  assert rust_tests.test_blocks("// #[cfg(test)]\nfn z() {}\n#[cfg(test)]\nfn w() { /* } */ }\n")
+    == [(2, 3)]
+}
+
+test "an item ends at a line closing it with `;`, or `,` outside a where clause" {
+  assert rust_tests.test_blocks(
+    "#[cfg(test)]\nimpl<T> A for B<T>\nwhere\n  T: C,\n{\n  fn f() {}\n}\n"
+  )
+    == [(0, 6)]
+  assert rust_tests.test_blocks("#[cfg(test)]\nuse super::*;\nfn x() {}\n") == [(0, 1)]
+  assert rust_tests.test_blocks("#[cfg(test)]\nconst R: &str = r#\"{ \"#;\nfn y() {}\n") == [(0, 1)]
+  assert rust_tests.test_blocks(
+    "#[cfg(test)]\nmod t { fn f<'a>(x: &'a str) {} }\n#[cfg(test)]\nmod u;\n"
+  )
+    == [(0, 1), (2, 3)]
+}

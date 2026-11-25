@@ -1,0 +1,200 @@
+# The items under `#[cfg(test)]` in a Rust source, found in one pass over
+# its bytes, as they read once comments and literals are blanked: an item
+# starts at a line whose first visible text is the attribute, and ends
+# where its braces balance or, at depth zero, at a line ending in `;` (or
+# `,` outside a where clause). A string's quotes stay visible; comments
+# and character literals do not.
+
+import km2.lexical.bytes.{byte, at}
+import km2.rust_literals
+import km2.rust_literals.{PHidden, PQuoted, PCode}
+
+#[doc("A `#[cfg(test)]` item: its first and last line, and whether a closing brace at depth one ended it.")]
+pub type TestItem = { first: Int, last: Int, braced: Bool }
+
+const NEWLINE : Int = 10
+
+const QUOTE : Int = 34
+
+const SEMICOLON : Int = 59
+
+const COMMA : Int = 44
+
+# What the scan meets at a byte: the end, a newline, the start of a
+# comment or literal, a blank, or code.
+type At = AtEnd | AtNewline | AtPiece | AtBlank | AtCode
+
+fn at_byte(s: String, i: Int, n: Int) : At =
+  if i >= n {
+    AtEnd
+  } else {
+    match byte(s, i) {
+      10 -> AtNewline
+      47 -> AtPiece
+      34 -> AtPiece
+      39 -> AtPiece
+      114 -> AtPiece
+      32 -> AtBlank
+      9 -> AtBlank
+      13 -> AtBlank
+      11 -> AtBlank
+      12 -> AtBlank
+      _ -> AtCode
+    }
+  }
+
+fn newlines(s: String, i: Int, j: Int, count: Int) : Int =
+  if i >= j {
+    count
+  } else {
+    newlines(s, i + 1, j, if byte(s, i) == NEWLINE { count + 1 } else { count })
+  }
+
+# Outside an item, only a line's first visible byte matters, and after it
+# only what can hide the next line's start: newlines and pieces.
+fn seek(s: String, i: Int, n: Int, line: Int, seen: Bool, acc: [TestItem]) : [TestItem] =
+  match at_byte(s, i, n) {
+    AtEnd -> list.reverse(acc)
+    AtNewline -> seek(s, i + 1, n, line + 1, false, acc)
+    AtPiece -> seek_piece(s, i, n, line, seen, acc)
+    AtBlank -> seek(s, i + 1, n, line, seen, acc)
+    AtCode ->
+      if seen { seek(s, i + 1, n, line, true, acc) } else { first_visible(s, i, n, line, acc) }
+  }
+
+fn first_visible(s: String, i: Int, n: Int, line: Int, acc: [TestItem]) : [TestItem] =
+  if at(s, i, "#[cfg(test)]") {
+    let o = Open { first: line, braces: 0, parens: 0, where_: false }
+    inside(s, i, n, line_at(line), -1, o, acc)
+  } else {
+    seek(s, i + 1, n, line, true, acc)
+  }
+
+fn seek_piece(s: String, i: Int, n: Int, line: Int, seen: Bool, acc: [TestItem]) : [TestItem] =
+  match rust_literals.piece_at(s, i, n) {
+    PHidden(j) -> {
+      let k = newlines(s, i, j, 0)
+      seek(s, j, n, line + k, if k > 0 { false } else { seen }, acc)
+    }
+    PQuoted(j, closed) -> {
+      let k = newlines(s, i, j, 0)
+      seek(s, j, n, line + k, if k > 0 { closed } else { true }, acc)
+    }
+    PCode -> seek(s, i + 1, n, line, true, acc)
+  }
+
+# The line being read: its number, and whether it opens with `where`.
+# The last visible byte on it travels apart, as `last`, -1 before any.
+type Line = { at: Int, where_: Bool }
+
+# The item being read: its first line, its depths, and whether a where
+# clause opened in it.
+type Open = { first: Int, braces: Int, parens: Int, where_: Bool }
+
+fn line_at(at: Int) : Line = Line { at: at, where_: false }
+
+fn carried(o: Open, l: Line) : Open = Open { ...o, where_: o.where_ or l.where_ }
+
+fn item(o: Open, last: Int, braced: Bool) : TestItem =
+  TestItem { first: o.first, last: last, braced: braced }
+
+fn closes(o: Open, l: Line, last: Int) : Bool =
+  o.braces == 0
+    and o.parens == 0
+    and (last == SEMICOLON or (last == COMMA and (not (o.where_ or l.where_))))
+
+# The end of a line inside an item, `k` newlines on: the item closes on
+# it, or goes on with the where clause it has seen.
+fn line_end(
+  s: String,
+  j: Int,
+  n: Int,
+  l: Line,
+  last: Int,
+  o: Open,
+  k: Int,
+  acc: [TestItem]
+) : [TestItem] =
+  if closes(o, l, last) {
+    seek(s, j, n, l.at + k, false, [item(o, l.at, false), ...acc])
+  } else {
+    inside(s, j, n, line_at(l.at + k), -1, carried(o, l), acc)
+  }
+
+fn inside(s: String, i: Int, n: Int, l: Line, last: Int, o: Open, acc: [TestItem]) : [TestItem] =
+  match at_byte(s, i, n) {
+    AtEnd -> list.reverse([item(o, l.at, false), ...acc])
+    AtNewline -> line_end(s, i + 1, n, l, last, o, 1, acc)
+    AtBlank -> inside(s, i + 1, n, l, last, o, acc)
+    AtPiece -> inside_piece(s, i, n, l, last, o, acc)
+    AtCode -> code(s, i, n, l, last, o, acc)
+  }
+
+fn inside_piece(
+  s: String,
+  i: Int,
+  n: Int,
+  l: Line,
+  last: Int,
+  o: Open,
+  acc: [TestItem]
+) : [TestItem] =
+  match rust_literals.piece_at(s, i, n) {
+    PCode -> code(s, i, n, l, last, o, acc)
+    PHidden(j) -> {
+      let k = newlines(s, i, j, 0)
+      if k == 0 { inside(s, j, n, l, last, o, acc) } else { line_end(s, j, n, l, last, o, k, acc) }
+    }
+    PQuoted(j, closed) -> {
+      let k = newlines(s, i, j, 0)
+      if k == 0 {
+        inside(s, j, n, l, QUOTE, o, acc)
+      } else {
+        inside(s, j, n, line_at(l.at + k), if closed { QUOTE } else { -1 }, carried(o, l), acc)
+      }
+    }
+  }
+
+# A visible byte of code: a bracket moves the depths, and a closing brace
+# can end the item. The first one on a line says whether it opens a where
+# clause.
+fn code(s: String, i: Int, n: Int, l: Line, last: Int, o: Open, acc: [TestItem]) : [TestItem] {
+  let b = byte(s, i)
+  let line = if last < 0 { Line { ...l, where_: at(s, i, "where") } } else { l }
+  if b == 125 and o.braces <= 1 {
+    seek(s, i + 1, n, l.at, true, [closed_by_brace(o, l), ...acc])
+  } else {
+    inside(s, i + 1, n, line, b, bracket(o, b), acc)
+  }
+}
+
+# A brace closing the item's own block ends it on this line; one with no
+# block open ends it on the line before.
+fn closed_by_brace(o: Open, l: Line) : TestItem =
+  if o.braces == 1 {
+    item(o, l.at, true)
+  } else {
+    item(o, if l.at - 1 > o.first { l.at - 1 } else { o.first }, false)
+  }
+
+fn parens(o: Open, d: Int) : Open =
+  Open { ...o, parens: if o.parens + d > 0 { o.parens + d } else { 0 } }
+
+fn bracket(o: Open, b: Int) : Open = match b {
+  40 -> parens(o, 1)
+  91 -> parens(o, 1)
+  41 -> parens(o, -1)
+  93 -> parens(o, -1)
+  123 -> Open { ...o, braces: o.braces + 1 }
+  125 -> Open { ...o, braces: o.braces - 1 }
+  _ -> o
+}
+
+#[doc("The `#[cfg(test)]` items of a Rust source, by line as `string.lines` splits it.")]
+pub fn test_items(src: String) : [TestItem] =
+  if not string.contains(src, "#[cfg(test)]") {
+    []
+  } else {
+    let n = string.byte_length(src)
+    seek(src, 0, if n > 0 and byte(src, n - 1) == NEWLINE { n - 1 } else { n }, 0, false, [])
+  }

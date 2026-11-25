@@ -67,76 +67,71 @@ fn raw_hashes(s: String, i: Int) : Int =
     -1
   }
 
-fn comment_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
+#[doc("What starts at a byte of Rust text: a comment or character literal, hidden up to `end`; a string, whose quotes stay visible, up to `end`; or plain code.")]
+pub type Piece = PHidden(Int) | PQuoted(Int, Bool) | PCode
+
+fn quoted(j: Int, n: Int, close_len: Int) : Piece =
+  if j < n { PQuoted(j + close_len, true) } else { PQuoted(n, false) }
+
+fn comment_at(s: String, i: Int, n: Int) : Piece =
   if at(s, i, "//") {
-    let j = find_byte(s, i, n, 10)
-    Some((blank(s, i, j), j))
+    PHidden(find_byte(s, i, n, 10))
   } else if at(s, i, "/*") {
-    let j = block_end(s, i + 2, n, 1)
-    Some((blank(s, i, j), j))
+    PHidden(block_end(s, i + 2, n, 1))
   } else {
-    None
+    PCode
   }
 
-# A string keeps its quotes, its content blanked; unterminated, it runs to the end.
-fn string_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
-  if byte(s, i) == 34 {
-    let j = string_end(s, i + 1, n)
-    let closed = j < n
-    Some(
-      (
-        "\"" ++ blank(s, i + 1, j) ++ (if closed { "\"" } else { "" }),
-        if closed { j + 1 } else { n }
-      )
-    )
-  } else {
-    None
-  }
-
-# A raw string keeps its quotes; its `r`, hashes and content are blanked.
-fn raw_piece(s: String, i: Int, n: Int) : Option[(String, Int)] {
+fn raw_at(s: String, i: Int, n: Int) : Piece {
   let k = raw_hashes(s, i)
-  if k < 0 {
-    None
+  if k < 0 { PCode } else { quoted(raw_end(s, i + 2 + k, n, k), n, 1 + k) }
+}
+
+# A quote opens a character literal, escaped or of one codepoint, or else
+# a lifetime, which is code.
+fn char_at(s: String, i: Int, n: Int) : Piece =
+  if byte(s, i + 1) == 92 {
+    let j = find_byte(s, i + 3, n, 39)
+    PHidden(if j < n { j + 1 } else { n })
   } else {
-    let open = i + 2 + k
-    let j = raw_end(s, open, n, k)
-    let closed = j < n
-    let close = if closed { "\"" ++ string.repeat(" ", k) } else { "" }
-    Some(
-      (
-        blank(s, i, open - 1) ++ "\"" ++ blank(s, open, j) ++ close,
-        if closed { j + 1 + k } else { n }
-      )
-    )
+    one_char(s, i, string.string_cp_len(s, i + 1))
+  }
+
+fn one_char(s: String, i: Int, w: Int) : Piece =
+  if w > 0 and byte(s, i + 1 + w) == 39 { PHidden(i + 2 + w) } else { PCode }
+
+#[doc("The piece of Rust text that starts at byte `i`, as the blanking reads it.")]
+pub fn piece_at(s: String, i: Int, n: Int) : Piece = match byte(s, i) {
+  47 -> comment_at(s, i, n)
+  34 -> quoted(string_end(s, i + 1, n), n, 1)
+  114 -> raw_at(s, i, n)
+  39 -> char_at(s, i, n)
+  _ -> PCode
+}
+
+# A string's text: its span blanked but for its opening quote and, when it
+# closes, its closing quote; a raw string's closing hashes are blanked too.
+fn quoted_text(s: String, i: Int, j: Int, closed: Bool) : String {
+  let q = find_byte(s, i, j, 34)
+  let open = blank(s, i, q) ++ "\""
+  if closed {
+    let c = j - 1 - count_back(s, j - 1, 35, 0)
+    open ++ blank(s, q + 1, c) ++ "\"" ++ blank(s, c + 1, j)
+  } else {
+    open ++ blank(s, q + 1, j)
   }
 }
+
+fn count_back(s: String, i: Int, b: Int, count: Int) : Int =
+  if i >= 0 and byte(s, i) == b { count_back(s, i - 1, b, count + 1) } else { count }
 
 # One piece at `i`, given as its text and where the scan goes on, or none
 # when the byte is plain code.
-fn piece(s: String, i: Int, n: Int) : Option[(String, Int)] = match byte(s, i) {
-  47 -> comment_piece(s, i, n)
-  34 -> string_piece(s, i, n)
-  114 -> raw_piece(s, i, n)
-  39 -> quote_piece(s, i, n)
-  _ -> None
+fn piece(s: String, i: Int, n: Int) : Option[(String, Int)] = match piece_at(s, i, n) {
+  PHidden(j) -> Some((blank(s, i, j), j))
+  PQuoted(j, closed) -> Some((quoted_text(s, i, j, closed), j))
+  PCode -> None
 }
-
-fn quote_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
-  if byte(s, i) != 39 {
-    None
-  } else if byte(s, i + 1) == 92 {
-    let j = find_byte(s, i + 3, n, 39)
-    let end = if j < n { j + 1 } else { n }
-    Some((blank(s, i, end), end))
-  } else {
-    let w = string.string_cp_len(s, i + 1)
-    if w > 0 and byte(s, i + 1 + w) == 39 {
-      Some((blank(s, i, i + 2 + w), i + 2 + w))
-    } else {
-      None
-    }
-  }
 
 # Only `/`, `"`, `'` and `r` can start a piece; other bytes are skipped
 # in one run.

@@ -4,57 +4,8 @@
 
 import path
 import km2.rust_literals
-import km2.lexical.bytes.{byte}
-
-type Ends = { braces: Int, parens: Int, where_clause: Bool }
-
-fn close_brace(e: Ends, from: Int, at: Int) : Result[Ends, Int] =
-  if e.braces == 0 {
-    Err(if at - 1 > from { at - 1 } else { from })
-  } else if e.braces == 1 {
-    Err(at)
-  } else {
-    Ok(Ends { ...e, braces: e.braces - 1 })
-  }
-
-fn after_byte(e: Ends, b: Int) : Ends =
-  if b == 40 or b == 91 {
-    Ends { ...e, parens: e.parens + 1 }
-  } else if b == 41 or b == 93 {
-    Ends { ...e, parens: if e.parens > 0 { e.parens - 1 } else { 0 } }
-  } else if b == 123 {
-    Ends { ...e, braces: e.braces + 1 }
-  } else {
-    e
-  }
-
-# The depths after a line, or the line where the item ends on it. Only
-# brackets count, and they are ASCII, so the line is read by byte.
-fn scan_line(line: String, i: Int, n: Int, e: Ends, from: Int, at: Int) : Result[Ends, Int] =
-  if i >= n {
-    Ok(e)
-  } else if byte(line, i) == 125 {
-    scan_line(line, i + 1, n, close_brace(e, from, at)!, from, at)
-  } else {
-    scan_line(line, i + 1, n, after_byte(e, byte(line, i)), from, at)
-  }
-
-# Where the item starting at line `from` ends: its braces balanced, or
-# its `;` (or `,` outside a where clause) at depth zero.
-fn item_end(lines: [String], from: Int, at: Int, e: Ends) : Int = match lines {
-  [] -> at - 1
-  [line, ...rest] -> match scan_line(line, 0, string.byte_length(line), e, from, at) {
-    Err(end) -> end
-    Ok(after) -> {
-      let w = after.where_clause or string.starts_with(string.trim_left(line), "where")
-      let t = string.trim_right(line)
-      let closed = after.braces == 0
-        and after.parens == 0
-        and (string.ends_with(t, ";") or (string.ends_with(t, ",") and (not w)))
-      if closed { at } else { item_end(rest, from, at + 1, Ends { ...after, where_clause: w }) }
-    }
-  }
-}
+import km2.rust_items
+import km2.rust_items.{TestItem}
 
 fn word_char(c: Char) : Bool = char.is_alnum(c)
 
@@ -108,39 +59,24 @@ fn candidates(declaring: String, original: [String], name: String) : [String] =
     }
   }
 
-fn items(code: [String], original: [String], i: Int, acc: [([String], [String])]) : [(
-  [String],
-  [String]
-)] =
-  match code {
-    [] -> list.reverse(acc)
-    [line, ...rest] ->
-      if string.starts_with(string.trim_left(line), "#[cfg(test)]") {
-        let n = item_end(code, i, i, Ends { braces: 0, parens: 0, where_clause: false }) - i + 1
-        items(list.drop(code, n), list.drop(original, n), i + n, [
-          (list.take(code, n), list.take(original, n)),
-          ...acc
-        ])
-      } else {
-        items(rest, list.drop(original, 1), i + 1, acc)
-      }
-  }
+fn span(lines: [String], t: TestItem) : [String] =
+  list.take(list.drop(lines, t.first), t.last - t.first + 1)
 
 #[doc("The files a Rust source declares as `#[cfg(test)]` modules, among the paths given.")]
 pub fn test_modules(declaring: String, src: String, walked: [String]) : [String] =
-  if not string.contains(src, "#[cfg(test)]") {
-    []
-  } else {
-    let original = string.lines(src)
-    items(rust_literals.code_lines(src), original, 0, [])
-      || (it => {
-        let (code, text) = it
-        match declared(string.join(code, "\n")) {
+  match rust_items.test_items(src) |? (t => not t.braced) {
+    [] -> []
+    unbraced -> {
+      let code = rust_literals.code_lines(src)
+      let original = string.lines(src)
+      unbraced
+        || (t => match declared(string.join(span(code, t), "\n")) {
           Some(name) ->
-            candidates(declaring, text, name) |> list.filter(c => list.contains(walked, c))
+            candidates(declaring, span(original, t), name)
+              |> list.filter(c => list.contains(walked, c))
           None -> []
-        }
-      })
+        })
+    }
   }
 
 #[doc("Whether a file is a test module or lies under one's directory.")]
@@ -154,21 +90,6 @@ pub fn in_test_module(p: String, modules: [String]) : Bool =
     p == m or string.starts_with(p, d ++ "/")
   })
 
-fn block_ranges(code: [String], i: Int, acc: [(Int, Int)]) : [(Int, Int)] = match code {
-  [] -> list.reverse(acc)
-  [line, ...rest] ->
-    if string.starts_with(string.trim_left(line), "#[cfg(test)]") {
-      let end = item_end(code, i, i, Ends { braces: 0, parens: 0, where_clause: false })
-      block_ranges(list.drop(code, end - i + 1), end + 1, [(i, end), ...acc])
-    } else {
-      block_ranges(rest, i + 1, acc)
-    }
-}
-
 #[doc("The first and last line of each item under `#[cfg(test)]` in a Rust source, its attribute included; comments and literals do not count.")]
 pub fn test_blocks(src: String) : [(Int, Int)] =
-  if string.contains(src, "#[cfg(test)]") {
-    block_ranges(rust_literals.code_lines(src), 0, [])
-  } else {
-    []
-  }
+  rust_items.test_items(src) | (t => (t.first, t.last))
