@@ -5,10 +5,12 @@
 
 const TSLanguage *tree_sitter_rust(void);
 const TSLanguage *tree_sitter_kaikai(void);
+const TSLanguage *tree_sitter_elixir(void);
 
 const TSLanguage *kts_language_named(const char *name) {
   if (strcmp(name, "rust") == 0) return tree_sitter_rust();
   if (strcmp(name, "kaikai") == 0) return tree_sitter_kaikai();
+  if (strcmp(name, "elixir") == 0) return tree_sitter_elixir();
   return NULL;
 }
 

@@ -20,6 +20,10 @@ test "a rust source parses into a flattened tree" {
   assert nodes("rust", "fn f() {}\n") > 1
 }
 
+test "an elixir source parses into a flattened tree" {
+  assert nodes("elixir", "defmodule M do\n  def f, do: 1\nend\n") > 1
+}
+
 test "an unknown grammar parses nothing" {
   assert nodes("cobol", "x") == (-1)
 }

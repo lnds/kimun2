@@ -14,5 +14,7 @@ sources = [
   "vendor/grammars/rust/src/scanner.c",
   "vendor/grammars/kaikai/src/parser.c",
   "vendor/grammars/kaikai/src/scanner.c",
+  "vendor/grammars/elixir/src/parser.c",
+  "vendor/grammars/elixir/src/scanner.c",
 ]
 include = ["c", "vendor/tree-sitter/lib/include", "vendor/tree-sitter/lib/src"]
