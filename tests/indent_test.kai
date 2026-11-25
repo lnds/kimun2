@@ -1,3 +1,5 @@
+import fs.file
+import km2.languages
 import km2.indent
 import km2.lines.{Blank, Code}
 
@@ -95,4 +97,17 @@ test "the sample standard deviation, zero below two values" {
 test "a file without code lines has no indentation" {
   assert indent.analyze("a", ["// x", ""], [Blank, Blank]) == None
   assert indent.analyze("a", ["x"], [Code]) != None
+}
+
+fn measured(p: String) : Bool / File = match (file.read(p), languages.by_name("a.js")) {
+  (Ok(src), Some(spec)) -> {
+    let (text_lines, kinds) = indent.classified(spec, src, false)
+    indent.analyze(p, text_lines, kinds) != None
+  }
+  _ -> false
+}
+
+test "a text file with stray UTF-8 continuation bytes is measured" {
+  assert measured("fixtures/content/stray.data")
+  assert measured("fixtures/content/latin1.data")
 }
