@@ -8,7 +8,7 @@ Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with eve
 
 ## Building
 
-Requires kaikai 0.201.0 (`.kaikai-version`), `km` and `jq` for the quality gate, and `git` for `loc --by-author`, `churn`, `age` and `authors`.
+Requires kaikai 0.201.1 (`.kaikai-version`), `km` and `jq` for the quality gate, and `git` for `loc --by-author`, `churn`, `age` and `authors`.
 
 ```sh
 make build   # ./km2
