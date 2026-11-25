@@ -67,11 +67,22 @@ KtsDoc *kts_parse(const char *lang, const char *src) {
   d->tree = language && d->src ? parse_tree(language, src, len) : NULL;
   if (!d->tree) return d;
   memcpy(d->src, src, len + 1);
-  d->count = ts_node_descendant_count(ts_tree_root_node(d->tree));
-  if (!allocate(d)) return d;
-  flatten(d);
   d->language = language;
   return d;
+}
+
+/* The flattened arrays, built the first time something asks for a node
+ * by index: a query alone does not need them. */
+int kts_flat(KtsDoc *d) {
+  if (d->id) return 1;
+  if (!d->language) return 0;
+  d->count = ts_node_descendant_count(ts_tree_root_node(d->tree));
+  if (!allocate(d)) {
+    d->count = 0;
+    return 0;
+  }
+  flatten(d);
+  return 1;
 }
 
 int kts_ok(KtsDoc *d) { return d && d->language != NULL; }
@@ -92,7 +103,7 @@ void kts_free(KtsDoc *d) {
   free(d);
 }
 
-int64_t kts_count(KtsDoc *d) { return d->language ? d->count : 0; }
+int64_t kts_count(KtsDoc *d) { return kts_flat(d) ? d->count : 0; }
 int64_t kts_symbol(KtsDoc *d, int64_t i) { return d->symbol[i]; }
 int kts_leaf(KtsDoc *d, int64_t i) { return d->leaf[i]; }
 int64_t kts_descendants(KtsDoc *d, int64_t i) { return d->descendants[i]; }

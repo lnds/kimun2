@@ -12,7 +12,7 @@ extern "C"("kts_ok") pub fn parsed(d: Doc) : Bool / Ffi
 #[doc("Releases the document and everything the shim holds for it.")]
 extern "C"("kts_free") pub fn free(d: Doc) : Unit / Ffi
 
-#[doc("Number of nodes, in preorder.")]
+#[doc("Number of nodes, in preorder; the first call flattens the tree.")]
 extern "C"("kts_count") pub fn count(d: Doc) : Int / Ffi
 
 #[doc("Grammar symbol of node `i`.")]
@@ -65,3 +65,12 @@ extern "C"("kts_capture_id") pub fn capture_id(d: Doc, k: Int) : Int / Ffi
 
 #[doc("Preorder index of the node of capture `k` of the last run.")]
 extern "C"("kts_capture_node") pub fn capture_node(d: Doc, k: Int) : Int / Ffi
+
+#[doc("Byte where the node of capture `k` of the last run starts.")]
+extern "C"("kts_capture_start_byte") pub fn capture_start_byte(d: Doc, k: Int) : Int / Ffi
+
+#[doc("Byte where the node of capture `k` of the last run ends.")]
+extern "C"("kts_capture_end_byte") pub fn capture_end_byte(d: Doc, k: Int) : Int / Ffi
+
+#[doc("Row where the node of capture `k` of the last run starts.")]
+extern "C"("kts_capture_start_row") pub fn capture_start_row(d: Doc, k: Int) : Int / Ffi

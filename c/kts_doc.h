@@ -12,7 +12,7 @@ struct KtsDoc {
   TSTree *tree;
   char *src;
   int64_t count;
-  /* Per node, in preorder. */
+  /* Per node, in preorder, once `kts_flat` has built them. */
   const void **id;
   uint16_t *symbol;
   uint8_t *leaf;
@@ -25,13 +25,14 @@ struct KtsDoc {
   int64_t slots;
   const void **slot_id;
   int64_t *slot_index;
-  /* Captures of the last query run: capture id and preorder index. */
+  /* Captures of the last query run: capture id and node. */
   int64_t captures;
   int64_t *capture_id;
-  int64_t *capture_node;
+  TSNode *capture_node;
 };
 
 const TSLanguage *kts_language_named(const char *name);
+int kts_flat(KtsDoc *d);
 void kts_forget_captures(KtsDoc *d);
 void kts_forget_index(KtsDoc *d);
 

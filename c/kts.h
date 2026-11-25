@@ -30,6 +30,9 @@ const char *kts_capture_name(KtsQuery *q, int64_t id);
 int64_t kts_run(KtsDoc *d, KtsQuery *q);
 int64_t kts_capture_id(KtsDoc *d, int64_t k);
 int64_t kts_capture_node(KtsDoc *d, int64_t k);
+int64_t kts_capture_start_byte(KtsDoc *d, int64_t k);
+int64_t kts_capture_end_byte(KtsDoc *d, int64_t k);
+int64_t kts_capture_start_row(KtsDoc *d, int64_t k);
 
 int64_t kts_symbol_count(const char *lang);
 const char *kts_symbol_name(const char *lang, int64_t symbol);

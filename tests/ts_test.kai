@@ -36,3 +36,27 @@ test "the shim evaluates #eq? on captured text" {
   let q = "((attribute name: (lower_identifier) @n) @a (#eq? @n \"doc\"))"
   assert captures("kaikai", "#[doc(\"x\")]\n#[constructor]\nfn f() : Int = 1\n", q) == 2
 }
+
+fn spans(d: ts.Doc, k: Int, acc: [(Int, Int, Int)]) : [(Int, Int, Int)] / Ffi =
+  if k < 0 {
+    acc
+  } else {
+    spans(d, k - 1, [
+      (ts.capture_start_row(d, k), ts.capture_start_byte(d, k), ts.capture_end_byte(d, k)),
+      ...acc
+    ])
+  }
+
+fn ranges(grammar: String, src: String, query: String) : [(Int, Int, Int)] / Ffi {
+  let q = ts.query(grammar, query)
+  let d = ts.parse(grammar, src)
+  let found = spans(d, ts.run(d, q) - 1, [])
+  ts.free(d)
+  ts.query_free(q)
+  found
+}
+
+test "a capture carries its row and byte range without flattening the tree" {
+  let src = "fn f() {}\nfn gh() {}\n"
+  assert ranges("rust", src, "(function_item name: (identifier) @n)") == [(0, 3, 4), (1, 13, 15)]
+}

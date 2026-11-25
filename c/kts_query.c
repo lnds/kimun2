@@ -138,7 +138,7 @@ static void keep(KtsDoc *d, int64_t *cap, uint32_t id, TSNode node) {
     d->capture_node = realloc(d->capture_node, sizeof *d->capture_node * (size_t)*cap);
   }
   d->capture_id[d->captures] = id;
-  d->capture_node[d->captures] = d->slot_index[slot_of(d, node.id)];
+  d->capture_node[d->captures] = node;
   d->captures++;
 }
 
@@ -146,7 +146,6 @@ static void keep(KtsDoc *d, int64_t *cap, uint32_t id, TSNode node) {
 int64_t kts_run(KtsDoc *d, KtsQuery *q) {
   kts_forget_captures(d);
   if (!d->language || !q->query) return 0;
-  if (!d->slot_id) index_nodes(d);
   int64_t cap = 16;
   d->capture_id = malloc(sizeof *d->capture_id * (size_t)cap);
   d->capture_node = malloc(sizeof *d->capture_node * (size_t)cap);
@@ -162,4 +161,12 @@ int64_t kts_run(KtsDoc *d, KtsQuery *q) {
 }
 
 int64_t kts_capture_id(KtsDoc *d, int64_t k) { return d->capture_id[k]; }
-int64_t kts_capture_node(KtsDoc *d, int64_t k) { return d->capture_node[k]; }
+int64_t kts_capture_node(KtsDoc *d, int64_t k) {
+  if (!kts_flat(d)) return -1;
+  if (!d->slot_id) index_nodes(d);
+  return d->slot_index[slot_of(d, d->capture_node[k].id)];
+}
+
+int64_t kts_capture_start_byte(KtsDoc *d, int64_t k) { return ts_node_start_byte(d->capture_node[k]); }
+int64_t kts_capture_end_byte(KtsDoc *d, int64_t k) { return ts_node_end_byte(d->capture_node[k]); }
+int64_t kts_capture_start_row(KtsDoc *d, int64_t k) { return ts_node_start_point(d->capture_node[k]).row; }
