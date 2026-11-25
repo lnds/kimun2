@@ -35,25 +35,43 @@ pub fn run(args: [String]) : Option[String] / Process = match process.pipe_errs(
   }
 }
 
-fn line_of(out: Option[String]) : Option[String] = out |> option.map(string.trim_right)
+# Runs git and gives what it wrote on stdout, whatever its exit status.
+fn output(args: [String]) : String / Process = match process.pipe_errs("git", args) {
+  Err(_) -> ""
+  Ok(c) -> {
+    let out = process.read_all(c)
+    drain_err(c)
+    let _ = process.wait(c)
+    ok(out) ?? ""
+  }
+}
 
 #[doc("Where a directory sits in its repository: the working tree, and the directory's path within it.")]
-pub type Repo = { work_tree: String, prefix: String }
+pub type Repo = { work_tree: String, prefix: String, shallow: Bool }
 
+const NOT_FOUND : String = "; class=Repository (6); code=NotFound (-3)"
+
+# One `rev-parse` answers everything: a bare repository stops at the
+# working tree, after saying it is bare.
 fn located(root: String) : Result[Repo, String] / Process =
-  match run(["-C", root, "rev-parse", "--is-bare-repository", "--show-toplevel", "--show-prefix"]) {
-    Some(out) -> match string.lines(out) {
-      ["false", top, prefix, ..._] ->
-        Ok(Repo { work_tree: top, prefix: string.drop_suffix(prefix, "/") ?? prefix })
-      ["false", top] -> Ok(Repo { work_tree: top, prefix: "" })
-      _ -> Err("could not find repository at '#{root}'; class=Repository (6); code=NotFound (-3)")
-    }
-    None ->
-      if line_of(run(["-C", root, "rev-parse", "--is-bare-repository"])) == Some("true") {
-        Err("bare repositories are not supported")
-      } else {
-        Err("could not find repository at '#{root}'; class=Repository (6); code=NotFound (-3)")
-      }
+  match string.lines(
+    output([
+      "-C",
+      root,
+      "rev-parse",
+      "--is-bare-repository",
+      "--is-shallow-repository",
+      "--show-prefix",
+      "--show-toplevel"
+    ])
+  ) {
+    ["false", shallow, prefix, top, ..._] -> Ok(Repo {
+      work_tree: top,
+      prefix: string.drop_suffix(prefix, "/") ?? prefix,
+      shallow: shallow == "true"
+    })
+    ["true", ..._] -> Err("bare repositories are not supported")
+    _ -> Err("could not find repository at '#{root}'#{NOT_FOUND}")
   }
 
 #[doc("The repository holding `root`, or km's message for why there is none.")]
@@ -67,8 +85,7 @@ pub fn discover(root: String) : Result[Repo, String] / File + Process =
   }
 
 #[doc("Whether the repository is a shallow clone.")]
-pub fn is_shallow(repo: Repo) : Bool / Process =
-  line_of(run(["-C", repo.work_tree, "rev-parse", "--is-shallow-repository"])) == Some("true")
+pub fn is_shallow(repo: Repo) : Bool = repo.shallow
 
 fn is_hex(c: Char) : Bool = char.is_digit(c) or list.contains(string.chars("abcdefABCDEF"), c)
 
