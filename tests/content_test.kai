@@ -1,0 +1,39 @@
+import km2.content
+import km2.content.{CText, CBinary}
+import km2.generated
+import km2.sources
+
+const DIR : String = "fixtures/content"
+
+fn hash_of(p: String) : Option[Int] / File = match content.read(p) {
+  Ok(CBinary(h)) -> Some(h)
+  _ -> None
+}
+
+test "a binary file is told by its head and hashed without being kept" {
+  assert content.is_binary("#{DIR}/image.bin")
+  assert hash_of("#{DIR}/image.bin") != None
+  assert hash_of("#{DIR}/image.bin") == hash_of("#{DIR}/image-copy.bin")
+}
+
+test "a text file is read whole" {
+  assert not content.is_binary("#{DIR}/plain.js")
+  assert match content.read("#{DIR}/plain.js") {
+    Ok(CText(src)) -> string.starts_with(src, "var a0 = 0;")
+    _ -> false
+  }
+}
+
+test "a source map named in a file's last bytes marks it generated" {
+  assert generated.is_generated("#{DIR}/bundle.js")
+  assert not generated.is_generated("#{DIR}/plain.js")
+}
+
+test "a file that starts with a UTF-8 continuation byte is read by range" {
+  assert not generated.is_generated("#{DIR}/stray.data")
+}
+
+test "a file without an extension is told by its shebang" {
+  assert (sources.language("#{DIR}/tool") |> option.map(.name)) == Some("Python")
+  assert sources.language("#{DIR}/image.bin") == None
+}

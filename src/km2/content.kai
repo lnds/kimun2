@@ -1,0 +1,46 @@
+# What a file holds, read only as far as needed: a binary file is told by
+# its first bytes, as km tells it, and is never read whole into memory.
+
+import fs.file
+import km2.lexical.bytes
+
+const HEAD_BYTES : Int = 512
+
+const CHUNK_BYTES : Int = 1048576
+
+#[doc("A file's content: its text, or the hash of a binary file's bytes.")]
+pub type Content = CText(String) | CBinary(Int)
+
+fn chunk_hash(p: String, offset: Int, acc: Int) : Result[Int, String] / File =
+  match file.read_range(p, offset, CHUNK_BYTES) {
+    Err(e) -> Err(e)
+    Ok("") -> Ok(acc)
+    Ok(chunk) ->
+      chunk_hash(p, offset + CHUNK_BYTES, string.string_hash("#{acc}/#{string.string_hash(chunk)}"))
+  }
+
+const SMALL_BYTES : Int = 65536
+
+fn large(p: String, head: String) : Result[Content, String] / File =
+  if bytes.is_binary(head) {
+    match chunk_hash(p, 0, 0) {
+      Ok(h) -> Ok(CBinary(h))
+      Err(_) -> file.read(p) |> result.map(src => CBinary(string.string_hash(src)))
+    }
+  } else {
+    file.read(p) |> result.map(CText)
+  }
+
+#[doc("A file's content, read whole only when it is text: a binary file (a NUL among its first 512 bytes) is hashed by chunks and not kept; `Err` is the error of reading the file whole.")]
+pub fn read(p: String) : Result[Content, String] / File = match file.read_range(p, 0, SMALL_BYTES) {
+  Ok(head) if string.byte_length(head) < SMALL_BYTES ->
+    Ok(if bytes.is_binary(head) { CBinary(string.string_hash(head)) } else { CText(head) })
+  Ok(head) -> large(p, head)
+  Err(_) -> file.read(p) |> result.map(CText)
+}
+
+#[doc("Whether a file is binary by its first 512 bytes; a file that cannot be read is not.")]
+pub fn is_binary(p: String) : Bool / File = match file.read_range(p, 0, HEAD_BYTES) {
+  Ok(head) -> bytes.is_binary(head)
+  Err(_) -> false
+}

@@ -60,20 +60,42 @@ fn head(src: String, n: Int, prefix: Int) : [String] {
 pub fn by_text(src: String) : Bool {
   let n = string.byte_length(src)
   let from = if n > TAIL_BYTES { string.ceil_char_boundary(src, n - TAIL_BYTES) } else { 0 }
-  let tail = string.slice(src, from, n - from)
-  list.any(string.split(string.to_lower(string.join(head(src, n, 4096), "\n")), "\n"), is_marker)
-    or string.contains(tail, "sourceMappingURL=")
+  has_marker(head(src, n, 4096)) or string.contains(string.slice(src, from, n - from), SOURCE_MAP)
+}
+
+const SOURCE_MAP : String = "sourceMappingURL="
+
+fn has_marker(lines: [String]) : Bool =
+  list.any(string.split(string.to_lower(string.join(lines, "\n")), "\n"), is_marker)
+
+# The first lines of a file, read from the shortest prefix that holds them.
+fn file_head(p: String, prefix: Int) : [String] / File = match file.read_range(p, 0, prefix) {
+  Err(_) -> []
+  Ok(text) -> {
+    let lines = string.split(text, "\n")
+    if list.length(lines) > HEAD_LINES or string.byte_length(text) < prefix {
+      list.take(lines, HEAD_LINES)
+    } else {
+      file_head(p, prefix * 16)
+    }
+  }
+}
+
+fn file_tail(p: String) : String / File = match file.metadata(p) {
+  Err(_) -> ""
+  Ok(m) -> {
+    let from = if m.size > TAIL_BYTES { m.size - TAIL_BYTES } else { 0 }
+    ok(file.read_range(p, from, TAIL_BYTES)) ?? ""
+  }
 }
 
 #[doc("Whether a file whose text is at hand is generated: by its name, a source map beside it, or that text.")]
 pub fn is_generated_text(p: String, src: String) : Bool / File =
   by_name(p) or file.exists(p ++ ".map") or by_text(src)
 
-#[doc("Whether a file is generated: by its name, a source map beside it, or its text; a file that cannot be read is judged by its name.")]
+#[doc("Whether a file is generated: by its name, a source map beside it, or its first lines and last bytes, read without reading the rest; a file that cannot be read is judged by its name.")]
 pub fn is_generated(p: String) : Bool / File =
   by_name(p)
     or file.exists(p ++ ".map")
-    or (match file.read(p) {
-      Ok(src) -> by_text(src)
-      Err(_) -> false
-    })
+    or has_marker(file_head(p, 4096))
+    or string.contains(file_tail(p), SOURCE_MAP)

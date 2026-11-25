@@ -2,13 +2,14 @@
 # indentation of its code lines as structure, not layout.
 
 import ahu.cli
-import fs.file
 import math.real
 import encoding.json
 import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
 import text
 import km2.churn
 import km2.code_text
+import km2.content
+import km2.content.{CText, CBinary}
 import km2.generated
 import km2.git
 import km2.history_report
@@ -306,13 +307,14 @@ pub fn shown(repo: Option[git.Repo], root: String, p: String) : String = match r
 }
 
 fn measure(w: Common, repo: Option[git.Repo], s: Source) : [FileIndent] / File + Stderr =
-  match file.read(s.path) {
+  match content.read(s.path) {
     Err(e) -> {
       Stderr.eprint("warning: #{s.path}: #{e}")
       []
     }
-    Ok(src) ->
-      if bytes.is_binary(src) or generated.is_generated_text(s.path, src) {
+    Ok(CBinary(_)) -> []
+    Ok(CText(src)) ->
+      if generated.is_generated_text(s.path, src) {
         []
       } else {
         let spec = languages.refine(s.path, s.spec, src)

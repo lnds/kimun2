@@ -39,6 +39,5 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 | A directory that cannot be read | warned about, with the OS error code | warned about, without the code | lnds/kaikai#3535 |
 | A file that cannot be read | `<path>: Permission denied (os error 13)` | `<path>: read_file: cannot open file` | lnds/kaikai#3535 |
 | An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |
-| Telling generated files by a source map named at their end | reads the last 512 bytes | reads the whole file (same result, more I/O) | lnds/kaikai#3562 |
 | `indent` over a text file with a stray UTF-8 continuation byte (some Latin-1 sources) | measures it | stops with a `string.slice` panic | lnds/kaikai#3565 |
-| `churn`, `authors` over a repository holding a binary file that starts with a UTF-8 continuation byte (`gohugoio/hugo`) | measured | stops with a `string.slice` panic | lnds/kaikai#3573 |
+| `indent` over a text file that starts with a UTF-8 continuation byte | measures it | stops with a `string.slice` panic | lnds/kaikai#3573 |

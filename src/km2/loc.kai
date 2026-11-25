@@ -7,12 +7,13 @@ import collections.map
 import collections.set
 import math.bits
 import time
+import km2.content
+import km2.content.{CText, CBinary}
 import km2.kinds
 import km2.kinds.{Kind, Selection, Declared, KCode, KDocs, KInfra, KData}
 import km2.languages
 import km2.languages.spec.{Spec}
 import km2.lines
-import km2.lexical.bytes
 import km2.loc_report
 import km2.loc_report.{Counts, Report, Stats}
 import km2.selection
@@ -45,17 +46,21 @@ fn bump(m: Map[String, Counts], key: String, c: Counts) : Map[String, Counts] =
 
 fn count(t: Tally, s: Source) : Tally / File + Stderr {
   let counted = Tally { ...t, text_files: t.text_files + 1 }
-  match file.read(s.path) {
+  match content.read(s.path) {
     Err(e) -> {
       Stderr.eprint("warning: #{s.path}: #{e}")
       counted
     }
-    Ok(src) -> {
+    Ok(CBinary(h)) ->
+      if set.contains(t.seen, h) {
+        Tally { ...counted, duplicates: t.duplicates + 1 }
+      } else {
+        Tally { ...counted, seen: set.insert(t.seen, h), binaries: t.binaries + 1 }
+      }
+    Ok(CText(src)) -> {
       let h = content_hash(src)
       if set.contains(t.seen, h) {
         Tally { ...counted, duplicates: t.duplicates + 1 }
-      } else if bytes.is_binary(src) {
-        Tally { ...counted, seen: set.insert(t.seen, h), binaries: t.binaries + 1 }
       } else {
         let spec = languages.refine(s.path, s.spec, src)
         let c = count_source(spec, src)

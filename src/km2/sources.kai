@@ -25,14 +25,23 @@ fn first_line(src: String) : String = match string.split_once(src, "\n") {
 #[doc("A file's language without its content when its name tells, else by its shebang.")]
 pub fn language(p: String) : Option[Spec] / File = match languages.by_name(p) {
   Some(s) -> Some(s)
-  None -> match file.read(p) {
-    Ok(src) -> {
-      let line = first_line(src)
-      if utf8.is_valid_string(line) { languages.by_shebang(line) } else { None }
-    }
-    Err(_) -> None
+  None -> match file_first_line(p, 256) {
+    Some(line) if utf8.is_valid_string(line) -> languages.by_shebang(line)
+    _ -> None
   }
 }
+
+# A file's first line, read from the shortest prefix that holds it.
+fn file_first_line(p: String, prefix: Int) : Option[String] / File =
+  match file.read_range(p, 0, prefix) {
+    Err(_) -> None
+    Ok(text) ->
+      if string.contains(text, "\n") or string.byte_length(text) < prefix {
+        Some(first_line(text))
+      } else {
+        file_first_line(p, prefix * 16)
+      }
+  }
 
 fn source_of(root: String, sel: Selection, p: String) : Option[Source] / File {
   let spec = language(p)!
