@@ -1,0 +1,340 @@
+# `tc`: temporal coupling, the pairs of files that change together in the
+# history git keeps of them.
+
+import ahu.cli
+import collections.map
+import fs.file
+import path
+import math.real
+import time
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
+import text
+import km2.config
+import km2.config.{Config}
+import km2.coupling
+import km2.coupling.{FilePair, CouplingHistory}
+import km2.generated
+import km2.git.{Repo}
+import km2.history_report
+import km2.kinds
+import km2.kinds.{Kind, Selection}
+import km2.languages
+import km2.selection
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+#[doc("What `tc` pairs and keeps: its thresholds and whether it pairs files of different kinds.")]
+pub type Pairing = {
+  min_degree: Int,
+  min_strength: Option[Real],
+  min_shared: Int,
+  max_changeset: Int,
+  across: Bool,
+  separate: Bool
+}
+
+#[doc("The kind of a path of history by its name; none for a path of no known language.")]
+pub fn kind_of(s: Selection, p: String) : Option[Kind] =
+  languages.by_name(p) |> option.map(spec => kinds.of_name(s, p, spec.name, spec.is_code))
+
+# Whether the metrics of code read a path of history; one of no known
+# language counts as code.
+fn measures_path(w: Common, p: String, separate: Bool) : Bool = match languages.by_name(p) {
+  None -> kinds.reads(w.selection, kinds.KCode)
+  Some(spec) -> kinds.measures(
+    w.selection,
+    kinds.of_name(w.selection, p, spec.name, spec.is_code),
+    spec.is_code,
+    separate
+  )
+}
+
+#[doc("Whether a path of history is read: one of code, or across kinds one of the kinds paired; never a generated one.")]
+pub fn reads(w: Common, o: Pairing, p: String) : Bool =
+  (not generated.by_name(p))
+    and (if o.across {
+      (kind_of(w.selection, p) |> option.map(k => kinds.across(w.selection, k))) ?? false
+    } else {
+      measures_path(w, p, o.separate)
+    })
+
+fn dirs_of(p: String) : [String] = list.init(string.split(p, "/")) ?? []
+
+#[doc("Whether the filters keep a path of history: no excluded directory on the way, and the file not excluded by extension or glob.")]
+pub fn kept(w: Common, p: String) : Bool =
+  (not list.any(dirs_of(p), d => list.contains(w.filter.exclude_dirs, d)))
+    and (not selection.excludes_by_extension(w.filter, p))
+    and (not selection.excludes_by_glob(w.filter, "", p))
+
+#[doc("Whether a path of history is in a test, example or benchmark directory, or is a test file.")]
+pub fn is_test_path(p: String) : Bool =
+  list.any(string.split(p, "/"), selection.is_non_production_dir) or selection.is_test_file(p)
+
+fn under(prefix: String, p: String) : Bool =
+  prefix == "" or p == prefix or string.starts_with(p, "#{prefix}/")
+
+fn exists(repo: Repo, p: String) : Bool / File = match file.metadata(path.join(repo.work_tree, p)) {
+  Ok(m) -> m.is_file
+  Err(_) -> false
+}
+
+#[doc("The commits of each file that may be paired: under the path analysed, still in the working tree, read, with `min_degree` commits, kept by the filters and, unless asked for, no test.")]
+pub fn eligible(
+  commits: Map[String, Int],
+  repo: Repo,
+  w: Common,
+  o: Pairing
+) : Map[String, Int] / File =
+  map.to_pairs(commits)
+    |? (kv => kv.snd >= o.min_degree and under(repo.prefix, kv.fst))
+    |? (kv => reads(w, o, kv.fst) and exists(repo, kv.fst))
+    |? (kv => kept(w, kv.fst) and ((not w.exclude_tests) or (not is_test_path(kv.fst))))
+    |> list.foldl(%{}, (m, kv) => map.put(m, kv.fst, kv.snd))
+
+#[doc("The pairs as strong as `min_strength` asks and, across kinds, whose files are of different kinds.")]
+pub fn kept_pairs(pairs: [FilePair], s: Selection, o: Pairing) : [FilePair] =
+  pairs
+    |? (p => match o.min_strength {
+      None -> true
+      Some(min) -> p.strength >= min
+    })
+    |? (p => (not o.across) or kind_of(s, p.file_a) != kind_of(s, p.file_b))
+
+# Reports.
+
+fn width_of(paths: [String]) : Int =
+  paths
+    |> list.foldl(6, (w, p) => {
+      let n = text.display_width(p)
+      if n > w { n } else { w }
+    })
+
+fn table_row(aw: Int, bw: Int, p: FilePair) : String {
+  let r = history_report.right
+  " #{history_report.left(p.file_a, aw)}  #{history_report.left(p.file_b, bw)}  #{r("#{p.shared}", 6)}  #{r(real.to_fixed(p.strength, 2), 8)}  #{r(coupling.label(coupling.level(p.strength)), 8)}"
+}
+
+#[doc("The table of `km tc`: the pairs shown, and how many there are when some are not.")]
+pub fn table(pairs: [FilePair], total: Int) : String =
+  if pairs == [] {
+    "No coupled file pairs found."
+  } else {
+    let aw = width_of(pairs | .file_a)
+    let bw = width_of(pairs | .file_b)
+    let width = aw + bw + 35
+    let rule = history_report.rule(if width > 78 { width } else { 78 })
+    let r = history_report.right
+    let head =
+      " #{history_report.left("File A", aw)}  #{history_report.left("File B", bw)}  #{r("Shared", 6)}  #{r("Strength", 8)}  #{r("Level", 8)}"
+    let more = if total > list.length(pairs) {
+      ["", "#{total} coupled pairs found (#{list.length(pairs)} shown)."]
+    } else {
+      []
+    }
+    [
+      "Temporal Coupling — Files That Change Together",
+      rule,
+      head,
+      rule,
+      ...pairs | (p => table_row(aw, bw, p)),
+      rule,
+      ...more
+    ]
+      |> string.join("\n")
+  }
+
+fn entry(p: FilePair) : JsonValue =
+  JObj([
+    ("file_a", JStr(p.file_a)),
+    ("file_b", JStr(p.file_b)),
+    ("shared_commits", JNum(p.shared)),
+    ("commits_a", JNum(p.commits_a)),
+    ("commits_b", JNum(p.commits_b)),
+    ("strength", JReal(real.round(p.strength * 100.0) / 100.0)),
+    ("level", JStr(coupling.label(coupling.level(p.strength))))
+  ])
+
+#[doc("The JSON of `km tc`: one entry per pair shown.")]
+pub fn to_json(pairs: [FilePair]) : String = json.json_encode_pretty(JArr(pairs | entry), 2)
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(pairs: [FilePair], total: Int) : String =
+  if pairs == [] {
+    "tc pairs:0 max_strength:0.00"
+  } else {
+    let max = pairs |> list.foldl(0.0, (m, p) => real.max(m, p.strength))
+    let strong = list.length(pairs |? (p => p.strength >= 0.5))
+    "tc pairs:#{total} strong:#{strong} max_strength:#{real.to_fixed(max, 2)}"
+  }
+
+fn render(format: String, pairs: [FilePair], total: Int) : Result[Unit, String] / Stdout =
+  match format {
+    "json" -> Ok(Stdout.print(to_json(pairs)))
+    "short" -> Ok(Stdout.print(short(pairs, total)))
+    "terse" -> Ok(Stdout.print("#{total}"))
+    "table" -> Ok(Stdout.print(table(pairs, total)))
+    _ -> Err(history_report.CI_FORMAT_ONLY)
+  }
+
+# The command.
+
+fn coupled(
+  h: CouplingHistory,
+  repo: Repo,
+  w: Common,
+  o: Pairing
+) : Option[[FilePair]] / File + Stderr {
+  let freqs = eligible(h.commits, repo, w, o)
+  if map.is_empty(freqs) {
+    Stderr.eprint(
+      "No files with >= #{o.min_degree} commits found. Try a lower --min-degree value."
+    )
+    None
+  } else if h.co_changes == [] {
+    Stderr.eprint("No commits with multiple files found.")
+    None
+  } else {
+    Some(kept_pairs(coupling.couplings(h.co_changes, freqs, o.min_shared), w.selection, o))
+  }
+}
+
+# The pairs of files under the path analysed that change together, or
+# none, after saying why on stderr.
+fn pairs(
+  c: cli.Context,
+  w: Common,
+  o: Pairing
+) : Result[Option[[FilePair]], String] / File + Process + Stderr + Clock {
+  let repo = history_report.repository(w.root)!
+  let since = history_report.since_option(cli.text(c, "since"), time.now().secs)!
+  history_report.warn_if_shallow(repo, walk_cli.SHALLOW)
+  let h = coupling.read_history(repo, since, o.max_changeset)
+  if map.is_empty(h.commits) {
+    Stderr.eprint(history_report.no_commits(since))
+    Ok(None)
+  } else {
+    Ok(coupled(h, repo, w, o))
+  }
+}
+
+fn min_strength(c: cli.Context, cfg: Config) : Result[Option[Real], String] =
+  match cli.text(c, "min-strength") {
+    None -> Ok(cfg.tc_min_strength)
+    Some(v) -> match string.string_to_real(v) {
+      Some(r) -> Ok(Some(r))
+      None -> Err("invalid value '#{v}' for '--min-strength <MIN_STRENGTH>': invalid float literal")
+    }
+  }
+
+const MIN_SHARED : Int = 3
+
+const MAX_CHANGESET : Int = 30
+
+fn pairing(c: cli.Context, cfg: Config) : Result[Pairing, String] {
+  let strength = min_strength(c, cfg)!
+  Ok(Pairing {
+    min_degree: cli.integer(c, "min-degree") ?? cfg.tc_min_degree ?? 3,
+    min_strength: strength,
+    min_shared: cli.integer(c, "min-shared") ?? MIN_SHARED,
+    max_changeset: cli.integer(c, "max-changeset") ?? MAX_CHANGESET,
+    across: cli.boolean(c, "across"),
+    separate: cfg.separate
+  })
+}
+
+fn tc(
+  c: cli.Context,
+  cfg: Config,
+  w: Common
+) : Result[Unit, String] / File + Process + Stdout + Stderr + Clock {
+  let o = pairing(c, cfg)!
+  if o.min_degree == 0 {
+    Err("--min-degree must be at least 1")
+  } else {
+    match pairs(c, w, o)! {
+      None -> Ok(())
+      Some(found) -> {
+        let all = coupling.sorted(found, cli.text(c, "sort-by") ?? "strength")
+        let total = list.length(all)
+        let shown = history_report.shown_count(w.format, cli.integer(c, "top"), total)
+        render(w.format, list.take(all, shown), total)
+      }
+    }
+  }
+}
+
+# km's `tc` reads the common arguments but has no `--list-excluded` of its own.
+fn run_tc(c: cli.Context) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock {
+  let cfg = config.load()
+  let w = walk_cli.common(c, cfg)!
+  tc(c, cfg, w)
+}
+
+fn count_option(name: String, description: String, value: String) : cli.OptionSpec =
+  cli.integer_option(name, description) |> cli.value_name(value)
+
+#[doc("The `tc` command, with `km tc`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+  cli.command(
+    "tc",
+    "Analyze temporal coupling: files that change together in commits",
+    run_tc
+  )
+    |> walk_cli.with_common
+    |> cli.with_option(
+      count_option(
+        "top",
+        "Rows of the table (default: 20); JSON lists every one of the file pairs unless given",
+        "TOP"
+      )
+    )
+    |> cli.with_option(
+      cli.text_option_with_default(
+        "sort-by",
+        "Sort by: strength or shared (default: strength)",
+        "strength"
+      )
+        |> cli.value_name("SORT_BY")
+        |> cli.choices(["strength", "shared"])
+    )
+    |> cli.with_option(
+      cli.text_option("since", "Only consider commits since this time (e.g. 6m, 1y, 30d)")
+        |> cli.value_name("SINCE")
+    )
+    |> cli.with_option(
+      count_option(
+        "min-degree",
+        "Minimum commits per file to be included (default: 3, overridable via .kimun.toml)",
+        "MIN_DEGREE"
+      )
+    )
+    |> cli.with_option(
+      cli.text_option(
+        "min-strength",
+        "Filter results: show only pairs with strength >= threshold (e.g. 0.5 for strong coupling only). Overridable via .kimun.toml [tc] min_strength."
+      )
+        |> cli.value_name("MIN_STRENGTH")
+    )
+    |> cli.with_option(
+      cli.integer_option_with_default(
+        "min-shared",
+        "Minimum commits two files must share to be a pair",
+        MIN_SHARED
+      )
+        |> cli.value_name("MIN_SHARED")
+    )
+    |> cli.with_option(
+      cli.integer_option_with_default(
+        "max-changeset",
+        "Ignore commits touching more than N files as evidence of coupling",
+        MAX_CHANGESET
+      )
+        |> cli.value_name("N")
+    )
+    |> cli.with_option(
+      cli.boolean_option(
+        "across",
+        "Only pairs of files of different kinds: code with documentation, code with infrastructure. Reads every kind but data unless --kind says which"
+      )
+    )

@@ -83,7 +83,8 @@ fn feed(c: Child, held: [String], state: s, step: (s, String) -> s) : s / Proces
     }
   }
 
-fn fold_log(repo: Repo, args: [String], state: s, step: (s, String) -> s) : s / Process =
+#[doc("Folds `step` over the commits of `git log` with `args`, newest first, each as `--format=%x01<fields>` writes it without its separator, as the log arrives.")]
+pub fn fold_log(repo: Repo, args: [String], state: s, step: (s, String) -> s) : s / Process =
   match process.pipe_from(
     "git",
     ["-C", repo.work_tree, "log", "--no-merges", "--no-color", ...args]

@@ -4,6 +4,7 @@ import km2.authors
 import km2.churn
 import km2.indent
 import km2.loc_cli
+import km2.tc
 
 #[doc("Exit code of a usage error, as km (clap) uses it.")]
 pub const USAGE_ERROR : Int = 2
@@ -20,6 +21,7 @@ pub fn application() : cli.App[File + Env + Process + Stdout + Stderr + Clock] =
     |> cli.add_command(churn.command())
     |> cli.add_command(age.command())
     |> cli.add_command(authors.command())
+    |> cli.add_command(tc.command())
 
 #[doc("Runs km2 against `argv` and returns the process exit code, with km's exit codes.")]
 pub fn run(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock = match argv {

@@ -141,3 +141,16 @@ pub fn measures(s: Selection, k: Kind, is_code: Bool, separate: Bool) : Bool = m
     _ -> false
   }
 }
+
+#[doc("The kind of a path of history, which may no longer exist, by its name alone: by `[kinds]` globs, else by its language and path.")]
+pub fn of_name(s: Selection, path: String, language: String, is_code: Bool) : Kind =
+  match list.find(s.declared, d => list.any(d.globs, g => glob.matches(g, path))) {
+    Some(d) -> d.kind
+    None -> by_language(path, language, is_code)
+  }
+
+#[doc("Whether pairs of files of different kinds read a kind: those `--kind` chose, else all but data, whose changes follow everything.")]
+pub fn across(s: Selection, k: Kind) : Bool = match s.chosen {
+  Some(ks) -> list.contains(ks, k)
+  None -> k != KData
+}

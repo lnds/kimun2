@@ -1,0 +1,202 @@
+# Temporal coupling: files that change together. Strength is the commits a
+# pair shares over the commits of the file with fewer, both counted over
+# the same commits. History is read without following renames, comparing
+# each commit with its first parent, and leaves out sweeping changes and
+# reverts.
+
+import collections.map
+import km2.git.{Repo}
+import km2.history
+import km2.history_report
+
+#[doc("The commits of each file and the files of each commit that changed two or more, counted over the same commits.")]
+pub type CouplingHistory = { commits: Map[String, Int], co_changes: [[String]] }
+
+const FIELD : String = "\x02"
+
+const OID_HEX : Int = 40
+
+fn is_hex(c: Char) : Bool = char.is_digit(c) or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F')
+
+#[doc("The commit a revert undoes, as `git revert` writes it: a message opening with `Revert \"` (or `Reapply \"`) that says `This reverts commit <sha>`; a short sha is padded with zeros, as libgit2 reads one.")]
+pub fn reverted_commit(message: String) : Option[String] =
+  if not (string.starts_with(message, "Revert \"") or string.starts_with(message, "Reapply \"")) {
+    None
+  } else {
+    match string.split_once(message, "This reverts commit ") {
+      None -> None
+      Some((_, after)) -> {
+        let hex = string.chars(after) |> list.take(OID_HEX + 1) |> list.take_while(is_hex)
+        let n = list.length(hex)
+        if n == 0 or n > OID_HEX {
+          None
+        } else {
+          Some(string.pad_right(string.to_lower(string.from_chars(hex)), OID_HEX, '0'))
+        }
+      }
+    }
+  }
+
+type Walk = { history: CouplingHistory, undone: Map[String, Bool], stopped: Bool }
+
+fn counted(h: CouplingHistory, paths: [String], max_changeset: Int) : CouplingHistory {
+  let n = list.length(paths)
+  if n > max_changeset {
+    h
+  } else {
+    let commits = paths |> list.foldl(h.commits, (m, p) => map.put(m, p, (map.get(m, p) ?? 0) + 1))
+    CouplingHistory {
+      commits: commits,
+      co_changes: if n >= 2 { [paths, ...h.co_changes] } else { h.co_changes }
+    }
+  }
+}
+
+# A revert and the commit it undoes count for nothing; a revert that was
+# itself reverted is undone and undoes nothing.
+fn walked(w: Walk, id: String, message: String, paths: [String], max_changeset: Int) : Walk =
+  if map.contains(w.undone, id) {
+    Walk { ...w, undone: map.remove(w.undone, id) }
+  } else {
+    match reverted_commit(message) {
+      Some(undone) -> Walk { ...w, undone: map.put(w.undone, undone, true) }
+      None -> Walk { ...w, history: counted(w.history, paths, max_changeset) }
+    }
+  }
+
+fn step(w: Walk, text: String, since: Option[Int], max_changeset: Int) : Walk =
+  if w.stopped {
+    w
+  } else {
+    let (header, changes) = history.parse_commit(text)
+    let (id, rest) = string.split_once(header, FIELD) ?? ((header, ""))
+    let (time, message) = string.split_once(rest, FIELD) ?? ((rest, ""))
+    match since {
+      Some(ts) if (string.to_int(time) ?? 0) < ts -> Walk { ...w, stopped: true }
+      _ -> walked(w, id, message, changes | .path, max_changeset)
+    }
+  }
+
+const LOG : [String] =
+  ["--no-show-signature", "--root", "--no-renames", "--raw", "--no-abbrev", "-z"]
+
+const START : Walk = Walk {
+  history: CouplingHistory { commits: %{}, co_changes: [] },
+  undone: %{},
+  stopped: false
+}
+
+#[doc("The coupling history of a whole `git log -z --raw --format=%x01%H%x02%ct%x02%B` text, newest first.")]
+pub fn history_of(log: String, since: Option[Int], max_changeset: Int) : CouplingHistory =
+  (string.split(log, "\x01")
+    |? (t => t != "")
+    |> list.foldl(START, (w, t) => step(w, t, since, max_changeset))).history
+
+#[doc("The coupling history of the repository, newest first, stopping at the first commit older than `since`; commits touching more than `max_changeset` files are left out.")]
+pub fn read_history(
+  repo: Repo,
+  since: Option[Int],
+  max_changeset: Int
+) : CouplingHistory / Process =
+  history.fold_log(
+    repo,
+    [...LOG, "--format=\x01%H#{FIELD}%ct#{FIELD}%B"],
+    START,
+    (w, text) => step(w, text, since, max_changeset)
+  ).history
+
+#[doc("How strongly a pair of files is coupled: strong from one half, moderate from three tenths, else weak.")]
+pub type Level = CStrong | CModerate | CWeak
+
+#[doc("The level's label as km prints it.")]
+pub fn label(l: Level) : String = match l {
+  CStrong -> "STRONG"
+  CModerate -> "MODERATE"
+  CWeak -> "WEAK"
+}
+
+#[doc("The level of a coupling strength.")]
+pub fn level(strength: Real) : Level =
+  if strength >= 0.5 { CStrong } else if strength >= 0.3 { CModerate } else { CWeak }
+
+#[doc("A pair of files, the first before the second by path, with the commits they share, the commits of each, and the strength of their coupling.")]
+pub type FilePair = {
+  file_a: String,
+  file_b: String,
+  shared: Int,
+  commits_a: Int,
+  commits_b: Int,
+  strength: Real
+}
+
+#[doc("Paths in the order Rust gives a `PathBuf`: component by component.")]
+pub fn by_path(a: String, b: String) : Int =
+  history_report.by_components(string.split(a, "/"), string.split(b, "/"))
+
+const SEP : String = "\x00"
+
+fn pairs_of(files: [String], counts: Map[String, Int]) : Map[String, Int] = match files {
+  [] -> counts
+  [a, ...rest] -> pairs_of(
+    rest,
+    rest
+      |> list.foldl(counts, (m, b) => {
+        let key = "#{a}#{SEP}#{b}"
+        map.put(m, key, (map.get(m, key) ?? 0) + 1)
+      })
+  )
+}
+
+fn pair_of(key: String, shared: Int, freqs: Map[String, Int]) : FilePair {
+  let (a, b) = string.split_once(key, SEP) ?? ((key, ""))
+  let commits_a = map.get(freqs, a) ?? 0
+  let commits_b = map.get(freqs, b) ?? 0
+  let fewer = if commits_a < commits_b { commits_a } else { commits_b }
+  FilePair {
+    file_a: a,
+    file_b: b,
+    shared: shared,
+    commits_a: commits_a,
+    commits_b: commits_b,
+    strength: int_to_real(shared) / int_to_real(fewer)
+  }
+}
+
+#[doc("The pairs of files that share at least `min_shared` commits, among the files of `freqs`, each of which has a commit at least.")]
+pub fn couplings(co_changes: [[String]], freqs: Map[String, Int], min_shared: Int) : [FilePair] {
+  let counts = co_changes
+    |> list.foldl(
+      %{},
+      (m, files) => pairs_of(
+        list.sort_by(files |? (p => map.contains(freqs, p)), by_path),
+        m
+      )
+    )
+  map.to_pairs(counts)
+    |? (kv => kv.snd >= min_shared)
+    | (kv => pair_of(kv.fst, kv.snd, freqs))
+}
+
+fn by_strength(a: FilePair, b: FilePair) : Int =
+  if a.strength > b.strength { -1 } else if a.strength < b.strength { 1 } else { 0 }
+
+fn by_files(a: FilePair, b: FilePair) : Int = match by_path(a.file_a, b.file_a) {
+  0 -> by_path(a.file_b, b.file_b)
+  c -> c
+}
+
+fn then(first: Int, rest: () -> Int) : Int = if first != 0 { first } else { rest() }
+
+#[doc("Pairs by `shared` (most first) or by strength (strongest first), then by the other key, then by their paths.")]
+pub fn sorted(pairs: [FilePair], by: String) : [FilePair] =
+  if by == "shared" {
+    list.sort_by(
+      pairs,
+      (a, b) => then(b.shared - a.shared, () => then(by_strength(a, b), () => by_files(a, b)))
+    )
+  } else {
+    list.sort_by(
+      pairs,
+      (a, b) => then(by_strength(a, b), () => then(b.shared - a.shared, () => by_files(a, b)))
+    )
+  }

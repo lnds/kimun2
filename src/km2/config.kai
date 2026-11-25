@@ -19,7 +19,9 @@ pub type Config = {
   kinds: KindGlobs,
   separate: Bool,
   active_days: Option[Int],
-  frozen_days: Option[Int]
+  frozen_days: Option[Int],
+  tc_min_degree: Option[Int],
+  tc_min_strength: Option[Real]
 }
 
 #[doc("The configuration of a project without `.kimun.toml`.")]
@@ -30,7 +32,9 @@ pub const DEFAULT : Config = Config {
   kinds: KindGlobs { code: [], docs: [], infra: [], data: [] },
   separate: false,
   active_days: None,
-  frozen_days: None
+  frozen_days: None,
+  tc_min_degree: None,
+  tc_min_strength: None
 }
 
 type Table = [Pair[String, TomlValue]]
@@ -118,6 +122,13 @@ fn count(root: Table, section: String, key: String) : Option[Int] =
     _ -> None
   }
 
+fn real_value(root: Table, section: String, key: String) : Option[Real] =
+  match value(root, section, key) {
+    Some(TReal(r)) -> Some(r)
+    Some(TInt(n)) -> Some(int_to_real(n))
+    _ -> None
+  }
+
 fn flag(root: Table, section: String, key: String) : Bool = match value(root, section, key) {
   Some(TBool(b)) -> b
   _ -> false
@@ -136,7 +147,9 @@ fn of_table(root: Table) : Config =
     },
     separate: flag(root, "kinds", "separate"),
     active_days: count(root, "age", "active_days"),
-    frozen_days: count(root, "age", "frozen_days")
+    frozen_days: count(root, "age", "frozen_days"),
+    tc_min_degree: count(root, "tc", "min_degree"),
+    tc_min_strength: real_value(root, "tc", "min_strength")
   }
 
 #[doc("Reads a configuration's text: `None` when it is not TOML or a value has the wrong type.")]

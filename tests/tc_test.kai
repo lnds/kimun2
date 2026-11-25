@@ -1,0 +1,85 @@
+import collections.map
+import km2.coupling
+import km2.coupling.{FilePair, CStrong, CModerate, CWeak}
+import km2.tc
+
+fn sha(c: String) : String = string.repeat(c, 40)
+
+fn modified(path: String) : String = ":100644 100644 #{sha("1")} #{sha("2")} M\x00#{path}\x00"
+
+fn commit(id: String, time: Int, message: String, paths: [String]) : String =
+  "\x01#{id}\x02#{time}\x02#{message}\x00\n#{string.join(paths | modified, "")}"
+
+fn commits_of(log: String, p: String) : Option[Int] =
+  map.get(coupling.history_of(log, None, 30).commits, p)
+
+test "each commit counts for every file it changed, and a pair needs two" {
+  let log = commit(sha("a"), 300, "x", ["a.rs", "b.rs"]) ++ commit(sha("b"), 200, "y", ["a.rs"])
+  let h = coupling.history_of(log, None, 30)
+  assert map.get(h.commits, "a.rs") == Some(2)
+  assert h.co_changes == [["a.rs", "b.rs"]]
+}
+
+test "a revert and the commit it reverts count for nothing" {
+  let revert = "Revert \"y\"\n\nThis reverts commit #{sha("b")}.\n"
+  let log = commit(sha("a"), 300, revert, ["a.rs", "b.rs"])
+    ++ commit(sha("b"), 200, "y", ["a.rs", "b.rs"])
+    ++ commit(sha("c"), 100, "z", ["a.rs"])
+  assert commits_of(log, "a.rs") == Some(1)
+  assert commits_of(log, "b.rs") == None
+}
+
+test "a short sha in a revert is padded, as libgit2 reads it" {
+  assert coupling.reverted_commit("Revert \"x\"\n\nThis reverts commit ABC.")
+    == Some("abc" ++ string.repeat("0", 37))
+  assert coupling.reverted_commit("Revert \"x\"\n\nThis reverts commit .") == None
+  assert coupling.reverted_commit("Fix \"x\"\n\nThis reverts commit abc.") == None
+}
+
+test "sweeping commits and commits older than since are left out" {
+  let log =
+    commit(sha("a"), 300, "x", ["a.rs", "b.rs", "c.rs"]) ++ commit(sha("b"), 100, "y", ["a.rs"])
+  assert map.get(coupling.history_of(log, None, 2).commits, "a.rs") == Some(1)
+  assert map.get(coupling.history_of(log, Some(200), 30).commits, "a.rs") == Some(1)
+}
+
+test "strength is the shared commits over the commits of the file with fewer" {
+  let freqs = %{ "a.rs": 4, "b.rs": 2, "c.rs": 9 }
+  let co = [["b.rs", "a.rs"], ["a.rs", "b.rs", "z.rs"], ["a.rs", "c.rs"]]
+  let pairs = coupling.couplings(co, freqs, 2)
+  assert list.length(pairs) == 1
+  let p = list.head(pairs) ?? FilePair {
+    file_a: "",
+    file_b: "",
+    shared: 0,
+    commits_a: 0,
+    commits_b: 0,
+    strength: 0.0
+  }
+  assert ((p.file_a, p.file_b, p.shared, p.strength)) == (("a.rs", "b.rs", 2, 1.0))
+}
+
+test "levels and order follow km" {
+  assert coupling.level(0.5) == CStrong
+  assert coupling.level(0.3) == CModerate
+  assert coupling.level(0.29) == CWeak
+  let p = (a: String, b: String, shared: Int, s: Real) => FilePair {
+    file_a: a,
+    file_b: b,
+    shared: shared,
+    commits_a: 9,
+    commits_b: 9,
+    strength: s
+  }
+  let pairs =
+    [p("b", "c", 5, 0.5), p("a", "c", 3, 0.9), p("a.rs", "b", 5, 0.5), p("a/x", "b", 5, 0.5)]
+  assert (coupling.sorted(pairs, "strength") | .file_a) == ["a", "a/x", "a.rs", "b"]
+  assert (coupling.sorted(pairs, "shared") | .file_a) == ["a/x", "a.rs", "b", "a"]
+}
+
+test "test paths are those of test files and of test, example or benchmark directories" {
+  assert tc.is_test_path("tests/a.rs")
+  assert tc.is_test_path("src/a_test.rs")
+  assert tc.is_test_path("examples/x/main.rs")
+  assert not tc.is_test_path("src/a.rs")
+}

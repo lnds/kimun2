@@ -112,3 +112,11 @@ pub fn warn_if_shallow(repo: Repo, warning: String) : Unit / Process + Stderr =
   if git.is_shallow(repo) {
     Stderr.eprint(warning)
   }
+
+#[doc("km's message for a history with no commit, in the repository or in the `--since` window.")]
+pub fn no_commits(since: Option[Int]) : String =
+  if since == None {
+    "No commits found in the repository."
+  } else {
+    "No commits found in the specified time range."
+  }

@@ -172,13 +172,6 @@ fn render(format: String, files: [FileChurn], shown: Int) : Result[Unit, String]
     _ -> Err(history_report.CI_FORMAT_ONLY)
   }
 
-fn no_commits(since: Option[Int]) : String =
-  if since == None {
-    "No commits found in the repository."
-  } else {
-    "No commits found in the specified time range."
-  }
-
 fn churn_of(
   repo: Repo,
   w: Common,
@@ -208,7 +201,7 @@ fn churn(
   history_report.warn_if_shallow(repo, walk_cli.SHALLOW)
   let freqs = history.frequencies(repo, since)
   if map.is_empty(freqs) {
-    Stderr.eprint(no_commits(since))
+    Stderr.eprint(history_report.no_commits(since))
     Ok(())
   } else {
     let files = churn_of(repo, w, code_files(w, cfg.separate), freqs, (since, now))

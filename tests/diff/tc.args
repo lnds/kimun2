@@ -1,0 +1,18 @@
+tc ../kimun
+tc --format json ../kimun
+tc --format short ../kimun
+tc --format terse ../kimun
+tc --sort-by shared --top 10 ../kimun
+tc --since 1y ../kimun
+tc --min-degree 5 --min-shared 5 ../kimun
+tc --min-strength 0.5 ../kimun
+tc --include-tests ../kimun
+tc --across ../kimun
+tc --across --kind docs --kind code ../kimun
+tc --max-changeset 5 ../kimun
+tc ../kimun/src
+tc --exclude-dir git ../kimun
+tc --exclude-ext md --across ../kimun
+tc --since 1d ../kimun
+tc --min-degree 900 ../kimun
+tc .
