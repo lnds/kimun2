@@ -102,10 +102,24 @@ static int operand(const KtsDoc *d, const TSQuery *q, const TSQueryMatch *m, TSQ
   return 1;
 }
 
-/* One `#eq?` or `#not-eq?` predicate, starting at step `p`. */
+/* Whether the capture of step `p` reads as any of the strings after it,
+ * up to the step that ends the predicate. */
+static int any_of(const KtsDoc *d, const TSQuery *q, const TSQueryMatch *m, const TSQueryPredicateStep *p) {
+  TSNode left;
+  if (p[1].type != TSQueryPredicateStepTypeCapture || !captured(m, p[1].value_id, &left)) return 0;
+  for (const TSQueryPredicateStep *s = p + 2; s->type == TSQueryPredicateStepTypeString; s++) {
+    uint32_t len = 0;
+    const char *text = ts_query_string_value_for_id(q, s->value_id, &len);
+    if (text_is(d, left, text, len)) return 1;
+  }
+  return 0;
+}
+
+/* One `#eq?`, `#not-eq?` or `#any-of?` predicate, starting at step `p`. */
 static int holds(const KtsDoc *d, const TSQuery *q, const TSQueryMatch *m, const TSQueryPredicateStep *p) {
   uint32_t len = 0;
   const char *op = ts_query_string_value_for_id(q, p[0].value_id, &len);
+  if (strcmp(op, "any-of?") == 0) return any_of(d, q, m, p);
   int eq = strcmp(op, "eq?") == 0;
   TSNode left;
   const char *right;

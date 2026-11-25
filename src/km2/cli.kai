@@ -2,6 +2,7 @@ import ahu.cli
 import km2.age
 import km2.authors
 import km2.churn
+import km2.cycom_cli
 import km2.indent
 import km2.loc_cli
 import km2.tc
@@ -13,27 +14,29 @@ pub const USAGE_ERROR : Int = 2
 pub const VERSION : String = "0.1.0"
 
 #[doc("The km2 command-line application: km's commands, as they are ported.")]
-pub fn application() : cli.App[File + Env + Process + Stdout + Stderr + Clock] =
+pub fn application() : cli.App[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
   cli.app("km2", "Code metrics over syntax trees, compatible with km")
     |> cli.versioned(VERSION)
     |> cli.add_command(loc_cli.command())
     |> cli.add_command(indent.command())
+    |> cli.add_command(cycom_cli.command())
     |> cli.add_command(churn.command())
     |> cli.add_command(age.command())
     |> cli.add_command(authors.command())
     |> cli.add_command(tc.command())
 
 #[doc("Runs km2 against `argv` and returns the process exit code, with km's exit codes.")]
-pub fn run(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock = match argv {
-  # km, through clap, prints the help on stderr and exits 2 when no command is given.
-  [] -> {
-    Stderr.eprint(cli.render_help(application()))
-    USAGE_ERROR
+pub fn run(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock + Ffi + Spawn =
+  match argv {
+    # km, through clap, prints the help on stderr and exits 2 when no command is given.
+    [] -> {
+      Stderr.eprint(cli.render_help(application()))
+      USAGE_ERROR
+    }
+    _ -> resolved(argv)
   }
-  _ -> resolved(argv)
-}
 
-fn resolved(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock =
+fn resolved(argv: [String]) : Int / Stdout + Stderr + File + Env + Process + Clock + Ffi + Spawn =
   match cli.resolve(
     application(),
     argv

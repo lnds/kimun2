@@ -233,3 +233,14 @@ pub fn with_common[e](cmd: cli.Command[e]) : cli.Command[e] =
         "Print files that would be excluded by the current filter and exit"
       )
     )
+
+#[doc("Adds km's `--top` for a report of files: rows of the table, every file in JSON unless given.")]
+pub fn with_top[e](cmd: cli.Command[e]) : cli.Command[e] =
+  cmd
+    |> cli.with_option(
+      cli.integer_option(
+        "top",
+        "Rows of the table (default: 20); JSON lists every one of the files unless given"
+      )
+        |> cli.value_name("TOP")
+    )

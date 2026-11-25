@@ -1,0 +1,97 @@
+# Syntax trees as plain values: a parsed file's query captures, each
+# with its name and where its node starts and ends. The tree-sitter
+# handles behind them live inside the `with_trees` handler and never
+# leave it.
+
+import km2.queries
+import km2.ts
+
+#[doc("A node a query captured: the capture's name, the node's first row and its byte range.")]
+pub type Capture = { name: String, row: Int, from: Int, to: Int }
+
+#[doc("Parsed sources, answered by `with_trees`.")]
+pub effect Trees {
+  captures(grammar: String, query: String, src: String) : [Capture]
+}
+
+#[doc("The grammar km2 parses a language with, by the language's name, when it vendors one.")]
+pub fn grammar_of(language: String) : Option[String] = match language {
+  "Rust" -> Some("rust")
+  "Elixir" -> Some("elixir")
+  "Elixir Script" -> Some("elixir")
+  "Kaikai" -> Some("kaikai")
+  _ -> None
+}
+
+# A query compiled for a grammar, with the names of its captures by id.
+type Compiled = { grammar: String, query_name: String, query: ts.Query, names: [String] }
+
+fn capture_names(q: ts.Query, id: Int, acc: [String]) : [String] / Ffi =
+  if id < 0 { acc } else { capture_names(q, id - 1, [ts.capture_name(q, id), ...acc]) }
+
+fn compiled(wanted: (String, String)) : Compiled / Ffi {
+  let (grammar, query_name) = wanted
+  let q = ts.query(grammar, queries.source(grammar, query_name))
+  Compiled {
+    grammar: grammar,
+    query_name: query_name,
+    query: q,
+    names: capture_names(q, ts.capture_count(q) - 1, [])
+  }
+}
+
+fn found(d: ts.Doc, names: [String], k: Int, acc: [Capture]) : [Capture] / Ffi =
+  if k < 0 {
+    acc
+  } else {
+    let c = Capture {
+      name: list.nth(names, ts.capture_id(d, k)) ?? "",
+      row: ts.capture_start_row(d, k),
+      from: ts.capture_start_byte(d, k),
+      to: ts.capture_end_byte(d, k)
+    }
+    found(d, names, k - 1, [c, ...acc])
+  }
+
+effect Parsed {
+  doc() : ts.Doc
+}
+
+# The captures of one source, its tree freed on every way out.
+fn parsed(c: Compiled, src: String) : [Capture] / Ffi =
+  handle {
+    let d = Parsed.doc()
+    found(d, c.names, ts.run(d, c.query) - 1, [])
+  } with Parsed {
+    initially {
+      ts.parse(c.grammar, src)
+    }
+    finally {
+      ts.free(state)
+    }
+    doc(resume) -> resume(state)
+    return(x) -> x
+  }
+
+fn lookup(all: [Compiled], grammar: String, query_name: String) : Option[Compiled] =
+  all |> list.find(c => c.grammar == grammar and c.query_name == query_name)
+
+fn free_all(all: [Compiled]) : Unit / Ffi = all |! (c => ts.query_free(c.query))
+
+#[doc("Runs `body` with `Trees` answered by tree-sitter: each `(grammar, query)` pair is compiled once and freed when `body` is done; a pair not compiled captures nothing.")]
+pub fn with_trees[r, e](wanted: [(String, String)], body: () -> r / Trees + e) : r / Ffi + e =
+  handle {
+    body()
+  } with Trees {
+    initially {
+      wanted | compiled
+    }
+    finally {
+      free_all(state)
+    }
+    captures(grammar, query, src, resume) -> resume(match lookup(state, grammar, query) {
+      Some(c) -> parsed(c, src)
+      None -> []
+    })
+    return(x) -> x
+  }

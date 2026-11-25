@@ -225,7 +225,7 @@ fn run_authors(
   walk_cli.walking(c, (_cfg, w) => authors(c, w))
 
 #[doc("The `authors` command, with `km authors`'s arguments and options.")]
-pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
   cli.command(
     "authors",
     "Summarize code ownership by author: files owned, lines, languages, last active date",

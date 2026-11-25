@@ -4,7 +4,7 @@ Code metrics over syntax trees: the successor of [km (Kimün)](https://github.co
 
 km2 aims to be a drop-in replacement for `km`: the same commands, flags, output formats, JSON schema and `.kimun.toml`, with better measurements wherever a syntax tree sees what a lexical reader cannot. Until it reaches parity, `km` remains the tool to use.
 
-Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. The other commands are not implemented yet.
+Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom` is ported for Rust, Elixir and Kaikai, which km2 parses; `km cycom` also measures some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
 
 ## Building
 
@@ -21,10 +21,20 @@ The language corpus, `tests/corpus/repos.tsv`, lists two real repositories per l
 
 ## km vs km2
 
-Every value km2 reports differently from `km` because it measures better, and why. None so far: the ported commands report what their `km` counterparts report.
+Every value km2 reports differently from `km` because it measures better, and why. Each is pinned by a fixture in `fixtures/cycom/differ`; `fixtures/cycom/same` holds what both report alike.
 
 | Command | Field | km | km2 | Reason |
 |---|---|---|---|---|
+| `cycom` | `complexity` | a branch for the `\|\|` of a closure without parameters (`\|\| 0`) and for `&&` in a reference pattern or type (`\|&&b\|`, `&&str`) | none | Neither is a decision: the tree tells a closure and a reference from a boolean operator. |
+| `cycom` | `functions` | a function for each `fn` written inside a `macro_rules!` body | none; the macro's body counts in `<file>` | A macro body is a template, not a function of the file. |
+| `cycom` | `functions`, `complexity` | the body of a function whose signature or head spans lines (Rust bounds and `where`, a kaikai `= match f(` with its arguments below) counted in `<file>` | counted in the function | The tree gives the function's extent whatever its layout. |
+| `cycom` | `complexity` | no branch for the arms of a `match` in a function written on one line | its arms | km skips an arrow that follows `fn` on its line, a rule for Elixir's anonymous functions. |
+| `cycom` | `complexity` | a branch for a keyword in the text of an Elixir sigil that interpolates (`~s\|path for #{x}\|`) | none | A sigil's text is a literal; only what it interpolates runs. |
+| `cycom` | `name` | `r` for a function named with a raw identifier (`r#async`) | `r#async` | The name as written. |
+| `cycom` | `name` | an Elixir name without its `?` or `!` (`valid`) | `valid?` | The name as written. |
+| `cycom` | `complexity` | no branch for code interpolated in an Elixir string (`"#{a \|\| b}"`) | its branches | Interpolated code runs. Documentation (`@doc`, `@moduledoc`, `@typedoc`) still counts nothing. |
+| `cycom` | `complexity` | an Elixir clause whose last pattern is `_` (`:exit, _ ->`) taken for a catch-all | a branch | Only a clause of the single pattern `_` matches anything. |
+| `cycom` | `functions` | a kaikai `extern` declaration over several lines as a function, and the one-line functions after it missed | the functions with a body | An `extern` has no body. |
 
 ## Known gaps
 

@@ -1,0 +1,54 @@
+# CI annotations of a complexity per function, as km writes them:
+# GitHub workflow commands and CodeClimate (GitLab Code Quality) issues.
+
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum}
+import km2.lexical.bytes.{byte}
+
+#[doc("A function at or above the threshold: where it is, its name and its complexity.")]
+pub type Finding = { path: String, line: Int, name: String, complexity: Int }
+
+fn message(f: Finding, kind: String, min: Int) : String =
+  "function '#{f.name}' has #{kind} complexity #{f.complexity} (threshold: #{min})"
+
+#[doc("One `::warning` line per finding, titled `title`; nothing when there is none.")]
+pub fn github(findings: [Finding], title: String, kind: String, min: Int) : String =
+  findings
+    | (f => "::warning file=#{f.path},line=#{f.line},title=#{title}::#{message(f, kind, min)}")
+    |> string.join("\n")
+
+const FNV_OFFSET : Int = -3750763034362895579
+
+const FNV_PRIME : Int = 1099511628211
+
+fn fnv1a(s: String, i: Int, n: Int, h: Int) : Int =
+  if i >= n { h } else { fnv1a(s, i + 1, n, bit_xor(h, byte(s, i)) * FNV_PRIME) }
+
+const HEX : String = "0123456789abcdef"
+
+fn hex(h: Int, shift: Int, acc: String) : String =
+  if shift < 0 {
+    acc
+  } else {
+    let d = bit_and(bit_ushr(h, shift), 15)
+    hex(h, shift - 4, acc ++ string.slice(HEX, d, 1))
+  }
+
+#[doc("The 64-bit FNV-1a hash of a text's bytes, as sixteen hex digits: the fingerprint km gives an issue.")]
+pub fn fingerprint(s: String) : String = hex(fnv1a(s, 0, string.byte_length(s), FNV_OFFSET), 60, "")
+
+#[doc("The CodeClimate severity of a complexity: info below 10, minor to 14, major to 24, critical from 25.")]
+pub fn severity(c: Int) : String =
+  if c >= 25 { "critical" } else if c >= 15 { "major" } else if c >= 10 { "minor" } else { "info" }
+
+fn issue(f: Finding, title: String, kind: String, min: Int) : JsonValue =
+  JObj([
+    ("description", JStr(message(f, kind, min))),
+    ("fingerprint", JStr(fingerprint("#{f.path}:#{f.line}:#{title}"))),
+    ("location", JObj([("lines", JObj([("begin", JNum(f.line))])), ("path", JStr(f.path))])),
+    ("severity", JStr(severity(f.complexity)))
+  ])
+
+#[doc("The CodeClimate JSON of the findings, keys in the order km writes them.")]
+pub fn codeclimate(findings: [Finding], title: String, kind: String, min: Int) : String =
+  json.json_encode_pretty(JArr(findings | (f => issue(f, title, kind, min))), 2)

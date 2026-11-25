@@ -1,0 +1,203 @@
+# `cycom`: cyclomatic complexity per function, from the captures of a
+# file's `cycom` query. A function is 1 plus its branches; the code
+# outside every function is one more entry, `<file>`.
+
+import km2.syntax.{Capture}
+
+#[doc("McCabe's bands, as km names them.")]
+pub type CycomLevel = CySimple | CyModerate | CyComplex | CyHighlyComplex | CyExtreme
+
+#[doc("The band a complexity falls in: up to 5, 10, 20, 50, and above.")]
+pub fn level_of(c: Int) : CycomLevel =
+  if c <= 5 {
+    CySimple
+  } else if c <= 10 {
+    CyModerate
+  } else if c <= 20 {
+    CyComplex
+  } else if c <= 50 {
+    CyHighlyComplex
+  } else {
+    CyExtreme
+  }
+
+#[doc("A function's name, the line its declaration starts on, and its complexity.")]
+pub type FunctionCycom = { name: String, start_line: Int, complexity: Int }
+
+#[doc("A file's functions, `<file>` first when it has one, with their total, maximum and average.")]
+pub type FileCycom = {
+  path: String,
+  language: String,
+  functions: [FunctionCycom],
+  total: Int,
+  max: Int,
+  avg: Real
+}
+
+#[doc("The name of the entry for the code outside every function.")]
+pub const OUTSIDE : String = "<file>"
+
+# The captures outside the excluded line ranges, which come in order and
+# do not overlap.
+fn outside(caps: [Capture], blocks: [(Int, Int)], acc: [Capture]) : [Capture] =
+  match (caps, blocks) {
+    ([], _) -> list.reverse(acc)
+    (_, []) -> list.reverse(acc) ++ caps
+    ([c, ...cs], [(from, to), ...bs]) ->
+      if c.row > to {
+        outside(caps, bs, acc)
+      } else if c.row >= from {
+        outside(cs, blocks, acc)
+      } else {
+        outside(cs, blocks, [c, ...acc])
+      }
+  }
+
+# The function being read: its name once seen, first line, end byte and
+# branches.
+type Open = { name: String, line: Int, to: Int, branches: Int }
+
+# A scope whose code belongs to no function around it (an Elixir
+# `quote`): the function it suspended and the byte where it ends.
+type Scope = { suspended: Option[Open], to: Int }
+
+# What the walk has counted: the functions closed, the one open, the
+# scopes open, the branches outside any function, and the row of the
+# last anonymous function.
+type Tally = {
+  closed: [FunctionCycom],
+  open: Option[Open],
+  scopes: [Scope],
+  outside: Int,
+  lambda_row: Int
+}
+
+fn close(t: Tally) : Tally = match t.open {
+  Some(o) -> Tally {
+    ...t,
+    closed: [
+      FunctionCycom { name: o.name, start_line: o.line, complexity: 1 + o.branches },
+      ...t.closed
+    ],
+    open: None
+  }
+  None -> t
+}
+
+# A scope ends with the function opened in it; the one it suspended
+# goes on.
+fn leave(t: Tally) : Tally = match t.scopes {
+  [s, ...rest] -> Tally { ...close(t), open: s.suspended, scopes: rest }
+  [] -> close(t)
+}
+
+# A capture past the end of the open function closes it, and one past
+# the end of the innermost scope leaves it.
+fn at(t: Tally, c: Capture) : Tally = match (t.open, t.scopes) {
+  (Some(o), _) if c.from >= o.to -> at(close(t), c)
+  (_, [s, ..._]) if c.from >= s.to -> at(leave(t), c)
+  _ -> t
+}
+
+fn finished(t: Tally) : Tally = if t.scopes == [] { close(t) } else { finished(leave(t)) }
+
+fn add(t: Tally, d: Int) : Tally = match t.open {
+  Some(o) -> Tally { ...t, open: Some(Open { ...o, branches: o.branches + d }) }
+  None -> Tally { ...t, outside: t.outside + d }
+}
+
+fn named(t: Tally, c: Capture, src: String) : Tally = match t.open {
+  Some(o) ->
+    if o.name == "" {
+      Tally { ...t, open: Some(Open { ...o, name: string.slice(src, c.from, c.to - c.from) }) }
+    } else {
+      t
+    }
+  None -> t
+}
+
+# A function inside an open one counts in it, as its closures do.
+fn opened(t: Tally, c: Capture) : Tally = match t.open {
+  Some(_) -> t
+  None -> Tally { ...t, open: Some(Open { name: "", line: c.row + 1, to: c.to, branches: 0 }) }
+}
+
+fn step(t: Tally, c: Capture, src: String) : Tally = match c.name {
+  "function" -> opened(t, c)
+  "name" -> named(t, c, src)
+  "branch" -> add(t, 1)
+  "unbranch" -> add(t, -1)
+  "arrow" -> if t.lambda_row == c.row { t } else { add(t, 1) }
+  "unarrow" -> if t.lambda_row == c.row { t } else { add(t, -1) }
+  "lambda" -> Tally { ...t, lambda_row: c.row }
+  "scope" ->
+    Tally { ...t, open: None, scopes: [Scope { suspended: t.open, to: c.to }, ...t.scopes] }
+  _ -> t
+}
+
+fn by_start(a: Capture, b: Capture) : Int = a.from - b.from
+
+fn tally(caps: [Capture], src: String) : Tally =
+  caps
+    |> list.foldl(
+      Tally { closed: [], open: None, scopes: [], outside: 0, lambda_row: -1 },
+      (t, c) => step(at(t, c), c, src)
+    )
+    |> finished
+
+# The captures outside every `ignore` capture, which spans documentation.
+fn undocumented(caps: [Capture], to: Int, acc: [Capture]) : [Capture] = match caps {
+  [] -> list.reverse(acc)
+  [c, ...cs] ->
+    if c.from < to {
+      undocumented(cs, to, acc)
+    } else if c.name == "ignore" {
+      undocumented(cs, c.to, acc)
+    } else {
+      undocumented(cs, to, [c, ...acc])
+    }
+}
+
+fn count(caps: [Capture], name: String) : Int =
+  caps |> list.foldl(0, (n, c) => if c.name == name { n + 1 } else { n })
+
+# Every top-level comment is an item too: a file has code when some
+# item is not one.
+fn has_code(caps: [Capture]) : Bool = count(caps, "item") > count(caps, "comment")
+
+fn summed(path: String, language: String, functions: [FunctionCycom]) : FileCycom {
+  let total = functions |> list.foldl(0, (s, f) => s + f.complexity)
+  FileCycom {
+    path: path,
+    language: language,
+    functions: functions,
+    total: total,
+    max: functions |> list.foldl(0, (m, f) => if f.complexity > m { f.complexity } else { m }),
+    avg: int_to_real(total) / int_to_real(list.length(functions))
+  }
+}
+
+#[doc("A file's cyclomatic complexity from its source, its query captures and the line ranges left out (tests, first and last line); none when it has no code.")]
+pub fn analyze(
+  path: String,
+  language: String,
+  src: String,
+  excluded: [(Int, Int)],
+  caps: [Capture]
+) : Option[FileCycom] {
+  let kept = outside(undocumented(list.sort_by(caps, by_start), 0, []), excluded, [])
+  if not has_code(kept) {
+    None
+  } else {
+    let t = tally(kept, src)
+    let functions = list.reverse(t.closed)
+    let outside = FunctionCycom { name: OUTSIDE, start_line: 1, complexity: 1 + t.outside }
+    Some(
+      summed(path, language, if functions == [] or t.outside > 0 {
+        [outside, ...functions]
+      } else {
+        functions
+      })
+    )
+  }
+}

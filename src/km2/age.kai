@@ -209,7 +209,7 @@ fn run_age(c: cli.Context) : Result[Unit, String] / File + Env + Process + Stdou
   walk_cli.walking(c, (cfg, w) => age(c, cfg, w))
 
 #[doc("The `age` command, with `km age`'s arguments and options.")]
-pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
   cli.command(
     "age",
     "Analyze code age: classify files as active, stale, or frozen by last git modification",

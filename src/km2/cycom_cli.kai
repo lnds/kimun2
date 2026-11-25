@@ -1,0 +1,149 @@
+# The `cycom` command: walks the code files, parses those of a language
+# with a grammar, and reports their cyclomatic complexity as km does.
+
+import ahu.cli
+import spawn
+import km2.churn
+import km2.cycom
+import km2.cycom.{FileCycom}
+import km2.cycom_report
+import km2.generated
+import km2.git
+import km2.history_report
+import km2.indent
+import km2.languages
+import km2.rust_tests
+import km2.sources.{Source}
+import km2.syntax
+import km2.syntax.{Trees}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+const QUERY : String = "cycom"
+
+fn of_text(w: Common, repo: Option[git.Repo], s: Source, src: String) : [FileCycom] / Trees {
+  let spec = languages.refine(s.path, s.spec, src)
+  match syntax.grammar_of(spec.name) {
+    None -> []
+    Some(g) -> {
+      let tests =
+        if w.exclude_tests and spec.name == "Rust" { rust_tests.test_blocks(src) } else { [] }
+      let caps = Trees.captures(g, QUERY, src)
+      match cycom.analyze(indent.shown(repo, w.root, s.path), spec.name, src, tests, caps) {
+        Some(f) -> [f]
+        None -> []
+      }
+    }
+  }
+}
+
+fn measure(w: Common, repo: Option[git.Repo], s: Source) : [FileCycom] / File + Stderr + Trees =
+  match generated.code_text(s.path) {
+    Some(src) -> of_text(w, repo, s, src)
+    None -> []
+  }
+
+# The grammars a part needs: compiling a query costs as much as parsing
+# a large file.
+fn grammars(part: [Source]) : [String] =
+  part
+    || (s => match syntax.grammar_of(s.spec.name) {
+      Some(g) -> [g]
+      None -> []
+    })
+    |> list.uniq
+
+fn measured_part(
+  w: Common,
+  repo: Option[git.Repo],
+  part: [Source]
+) : [FileCycom] / File + Stderr + Ffi =
+  syntax.with_trees(grammars(part) | (g => (g, QUERY)), () => (part || (s => measure(w, repo, s))))
+
+# Fibers that parse at once, each with its own queries.
+const PARTS : Int = 2
+
+fn parts(xs: [Source], size: Int, acc: [[Source]]) : [[Source]] =
+  if xs == [] {
+    list.reverse(acc)
+  } else {
+    parts(list.drop(xs, size), size, [list.take(xs, size), ...acc])
+  }
+
+# The walk in consecutive parts, each parsed on a fiber of its own; the
+# results come back in walk order.
+fn measured(
+  w: Common,
+  repo: Option[git.Repo],
+  files: [Source]
+) : [FileCycom] / File + Stderr + Ffi + Spawn {
+  let size = (list.length(files) + PARTS - 1) / PARTS
+  nursery { n ->
+    let fibers = parts(files, if size > 0 { size } else { 1 }, [])
+      | (p => n.spawn(() => measured_part(w, repo, p)))
+    fibers || (f => n.await(f))
+  }
+}
+
+fn descending(a: Real, b: Real) : Int = if a > b { -1 } else if a < b { 1 } else { 0 }
+
+#[doc("Files by `--sort-by`: total (the default), max or avg, highest first, ties in walk order.")]
+pub fn sorted(files: [FileCycom], by: String) : [FileCycom] = match by {
+  "max" -> files |> list.sort_by((a, b) => b.max - a.max)
+  "avg" -> files |> list.sort_by((a, b) => descending(a.avg, b.avg))
+  _ -> files |> list.sort_by((a, b) => b.total - a.total)
+}
+
+fn printed(s: String) : Unit / Stdout = if s == "" { () } else { Stdout.print(s) }
+
+fn render(c: cli.Context, format: String, files: [FileCycom], min: Int) : Unit / Stdout {
+  let shown = history_report.shown_count(format, cli.integer(c, "top"), list.length(files))
+  match format {
+    "json" -> Stdout.print(cycom_report.to_json(list.take(files, shown)))
+    "short" -> Stdout.print(cycom_report.short(files))
+    "terse" -> Stdout.print(cycom_report.terse(files))
+    "github" -> printed(cycom_report.github(files, min))
+    "codeclimate" -> Stdout.print(cycom_report.codeclimate(files, min))
+    _ ->
+      if cli.boolean(c, "per-function") {
+        Stdout.print(cycom_report.per_function(list.take(files, shown), min))
+      } else {
+        Stdout.print(cycom_report.table(files, shown))
+      }
+  }
+}
+
+fn run_cycom(
+  c: cli.Context
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn =
+  walk_cli.walking(c, (cfg, w) => {
+    let repo = ok(git.discover(w.root))
+    let min = cli.integer(c, "min-complexity") ?? 1
+    let files = measured(w, repo, churn.measured_files(w, cfg.separate))
+    let kept = if min > 1 { files |? (f => f.max >= min) } else { files }
+    Ok(render(c, w.format, sorted(kept, cli.text(c, "sort-by") ?? "total"), min))
+  })
+
+#[doc("The `cycom` command, with `km cycom`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
+  cli.command("cycom", "Analyze cyclomatic complexity per file and per function", run_cycom)
+    |> walk_cli.with_common
+    |> cli.with_option(
+      cli.integer_option_with_default(
+        "min-complexity",
+        "Skip files whose most complex function is below N; with --per-function, also hide functions below N (default: 1)",
+        1
+      )
+        |> cli.value_name("MIN_COMPLEXITY")
+    )
+    |> walk_cli.with_top
+    |> cli.with_option(cli.boolean_option("per-function", "Show per-function breakdown"))
+    |> cli.with_option(
+      cli.text_option_with_default(
+        "sort-by",
+        "Sort by metric: total, max, or avg (default: total)",
+        "total"
+      )
+        |> cli.value_name("SORT_BY")
+        |> cli.choices(["total", "max", "avg"])
+    )

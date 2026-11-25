@@ -275,7 +275,7 @@ fn count_option(name: String, description: String, value: String) : cli.OptionSp
   cli.integer_option(name, description) |> cli.value_name(value)
 
 #[doc("The `tc` command, with `km tc`'s arguments and options.")]
-pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
   cli.command(
     "tc",
     "Analyze temporal coupling: files that change together in commits",

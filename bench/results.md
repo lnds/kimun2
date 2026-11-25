@@ -4,7 +4,30 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `loc` over the language corpus, on kaikai 0.199.2 (current)
+## `cycom` over tree-sitter, on kaikai 0.201.0 (current, out of budget on memory)
+
+`/usr/bin/time -l`, the median of three runs, on a machine under load (load average 6), so instructions retired are the steadier figure. `km cycom` with `--include-ext` for the languages km2 parses. Inputs: ten copies of ripgrep's crates (`rg10`, 780 Rust files), ripgrep, phoenix (Elixir) and the kaikai 0.200.2 stdlib with km2's own `src`.
+
+km2 parses the walk in two parts, each on a fiber of its own with its own queries, at the default thread count:
+
+| Input | km time | km RSS | km2 time | km2 RSS | time | RSS |
+|---|---|---|---|---|---|---|
+| `rg10` | 1.67 s | 20.2 MB | 1.56 s | 49.2 MB | 0.93× | 2.44× |
+| ripgrep | 0.18 s | 18.0 MB | 0.20 s | 34.6 MB | 1.11× | 1.92× |
+| phoenix | 0.10 s | 12.7 MB | 0.13 s | 21.1 MB | 1.30× | 1.66× |
+| kaikai | 0.11 s | 12.7 MB | 0.10 s | 16.3 MB | 0.91× | 1.28× |
+
+Time is within budget; memory is not. Single-threaded km2 fits the memory budget and not the time one. With two parts, memory also grows with the threads the runtime starts, though only two fibers parse: on `rg10`, 28.9 MB at `KAI_THREADS=1`, 39.4 MB at 2, 49.9 MB at 16 (the default here). A kaikai program whose two fibers only build lists gains 1.3 MB from 4 to 16 threads, so most of that growth is km2's, likely the allocator's per-thread caches that tree-sitter's allocations leave behind as fibers move between threads; not yet measured.
+
+| `rg10`, four parts | time | RSS |
+|---|---|---|
+| `KAI_THREADS=1` | 2.68 s (1.71×) | 29.9 MB (1.49×) |
+| `KAI_THREADS=2` | 1.69 s (1.08×) | 36.6 MB (1.82×) |
+| `KAI_THREADS=4` | 1.28 s (0.82×) | 48.8 MB (2.43×) |
+
+Where the time goes, in instructions retired on `rg10`: km's whole `cycom` is 17.1 G; tree-sitter parsing every file is 19.7 G of km2's 31.1 G, and the query adds 1.7 G. Flattening the tree only on demand saved 14% on Rust and 31% on Elixir; it is no longer done for a query. Compiling a query costs about 90 M instructions, so each fiber compiles only the queries of the grammars its part holds: with 64 parts, compiling alone took more than the parse.
+
+## `loc` over the language corpus, on kaikai 0.199.2
 
 `tools/corpus.sh run`, single warm runs. Output equals km's on 82 repositories. The other 2 are lnds/kaikai#3555: `trim` and `is_blank`, now Unicode-aware, read some invalid UTF-8 bytes as whitespace (a stray `0x85` as NEL, a truncated `0xE9` as TAB), so a Big5 file in helix-editor/helix and a one-byte Latin-1 JSON file in erlang/otp count lines as blank that km counts as code. WordPress and osiris, which differed through #3512, now match.
 

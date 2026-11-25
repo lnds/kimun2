@@ -1,0 +1,147 @@
+# The outputs of `km cycom`: table, per-function breakdown, JSON, the
+# one-line summaries and the CI annotations.
+
+import math.real
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
+import text
+import km2.cycom
+import km2.cycom.{CycomLevel, CySimple, CyModerate, CyComplex, CyHighlyComplex, CyExtreme, FileCycom, FunctionCycom}
+
+import km2.ci_report
+import km2.history_report
+
+fn label(l: CycomLevel) : String = match l {
+  CySimple -> "simple"
+  CyModerate -> "moderate"
+  CyComplex -> "complex"
+  CyHighlyComplex -> "highly complex"
+  CyExtreme -> "extreme"
+}
+
+fn json_label(l: CycomLevel) : String = string.replace(label(l), " ", "_")
+
+fn widest(names: [String], least: Int) : Int =
+  names
+    |> list.foldl(least, (w, s) => {
+      let n = text.display_width(s)
+      if n > w { n } else { w }
+    })
+
+fn pad(s: String, width: Int) : String = s ++ string.repeat(" ", width - text.display_width(s))
+
+fn fixed(x: Real) : String = real.to_fixed(x, 1)
+
+fn function_count(files: [FileCycom]) : Int =
+  files |> list.foldl(0, (n, f) => n + list.length(f.functions))
+
+fn total(files: [FileCycom]) : Int = files |> list.foldl(0, (n, f) => n + f.total)
+
+fn most(files: [FileCycom]) : Int =
+  files |> list.foldl(0, (m, f) => if f.max > m { f.max } else { m })
+
+fn average(files: [FileCycom]) : Real {
+  let n = function_count(files)
+  if n > 0 { int_to_real(total(files)) / int_to_real(n) } else { 0.0 }
+}
+
+fn total_label(all: Int, shown: Int) : String =
+  if shown < all { " Total (#{all} files, #{shown} shown)" } else { " Total (#{all} files)" }
+
+fn numbers(functions: Int, avg: Real, max: Int, sum: Int) : String {
+  let r = history_report.right
+  "#{r("#{functions}", 9)} #{r(fixed(avg), 5)} #{r("#{max}", 5)} #{r("#{sum}", 7)}"
+}
+
+#[doc("The table of `km cycom`: the first `shown` files, totals over all.")]
+pub fn table(files: [FileCycom], shown: Int) : String =
+  if files == [] {
+    "No recognized source files found."
+  } else {
+    let rows = list.take(files, shown)
+    let w = widest(rows | .path, 4)
+    let rule = history_report.rule(if w + 55 > 78 { w + 55 } else { 78 })
+    let r = history_report.right
+    [
+      "Cyclomatic Complexity",
+      rule,
+      " #{pad("File", w)}  #{r("Functions", 9)} #{r("Avg", 5)} #{r("Max", 5)} #{r("Total", 7)}  Level",
+      rule,
+      ...rows
+        | (f => " #{pad(f.path, w)}  #{numbers(list.length(f.functions), f.avg, f.max, f.total)}  #{label(cycom.level_of(f.max))}"),
+      rule,
+      "#{pad(total_label(list.length(files), shown), w + 1)}  #{numbers(function_count(files), average(files), most(files), total(files))}"
+    ]
+      |> string.join("\n")
+  }
+
+fn at_least(f: FileCycom, min: Int) : [FunctionCycom] = f.functions |? (g => g.complexity >= min)
+
+fn breakdown(f: FileCycom, min: Int) : [String] {
+  let rows = at_least(f, min)
+  let w = widest(rows | .name, 10)
+  [
+    "",
+    "#{f.path}:",
+    ...rows
+      | (g => "  #{pad(g.name, w)}  #{history_report.right("#{g.complexity}", 5)}  #{label(cycom.level_of(g.complexity))}")
+  ]
+}
+
+#[doc("The per-function breakdown of `km cycom --per-function`: functions of at least `min`.")]
+pub fn per_function(files: [FileCycom], min: Int) : String =
+  if files == [] {
+    "No recognized source files found."
+  } else {
+    let rule = history_report.rule(78)
+    ["Cyclomatic Complexity (per function)", rule, ...files || (f => breakdown(f, min)), rule]
+      |> string.join("\n")
+  }
+
+fn function_entry(g: FunctionCycom) : JsonValue =
+  JObj([
+    ("name", JStr(g.name)),
+    ("start_line", JNum(g.start_line)),
+    ("complexity", JNum(g.complexity)),
+    ("level", JStr(json_label(cycom.level_of(g.complexity))))
+  ])
+
+fn entry(f: FileCycom) : JsonValue =
+  JObj([
+    ("path", JStr(f.path)),
+    ("language", JStr(f.language)),
+    ("function_count", JNum(list.length(f.functions))),
+    ("avg_complexity", JReal(f.avg)),
+    ("max_complexity", JNum(f.max)),
+    ("total_complexity", JNum(f.total)),
+    ("level", JStr(json_label(cycom.level_of(f.max)))),
+    ("functions", JArr(f.functions | function_entry))
+  ])
+
+#[doc("The JSON of `km cycom`: one entry per file.")]
+pub fn to_json(files: [FileCycom]) : String = json.json_encode_pretty(JArr(files | entry), 2)
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(files: [FileCycom]) : String =
+  "cycom files:#{list.length(files)} fns:#{function_count(files)} avg:#{fixed(average(files))} max:#{most(files)} total:#{total(files)}"
+
+#[doc("The average of `--format terse`.")]
+pub fn terse(files: [FileCycom]) : String = fixed(average(files))
+
+fn findings(files: [FileCycom], min: Int) : [ci_report.Finding] =
+  files
+    || (f => (at_least(f, min)
+      | (g => ci_report.Finding {
+        path: f.path,
+        line: g.start_line,
+        name: g.name,
+        complexity: g.complexity
+      })))
+
+#[doc("The GitHub annotations of `--format github`: one per function of at least `min`.")]
+pub fn github(files: [FileCycom], min: Int) : String =
+  ci_report.github(findings(files, min), "Cyclomatic Complexity", "cyclomatic", min)
+
+#[doc("The CodeClimate report of `--format codeclimate`: one entry per function of at least `min`.")]
+pub fn codeclimate(files: [FileCycom], min: Int) : String =
+  ci_report.codeclimate(findings(files, min), "Cyclomatic Complexity", "cyclomatic", min)

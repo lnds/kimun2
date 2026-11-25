@@ -1,0 +1,9 @@
+fn quoted(a: Int, b: Int) : Option[Int] = match pick(
+  a,
+  b
+) {
+  Some(l) if l > 0 -> Some(l)
+  _ -> None
+}
+
+fn pick(a: Int, b: Int) : Option[Int] = if a > b { Some(a) } else { None }

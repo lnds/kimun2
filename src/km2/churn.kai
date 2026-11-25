@@ -220,20 +220,14 @@ fn run_churn(
   walk_cli.walking(c, (cfg, w) => churn(c, cfg, w))
 
 #[doc("The `churn` command, with `km churn`'s arguments and options.")]
-pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
   cli.command(
     "churn",
     "Analyze code churn: pure change frequency per file (git commits only)",
     run_churn
   )
     |> walk_cli.with_common
-    |> cli.with_option(
-      cli.integer_option(
-        "top",
-        "Rows of the table (default: 20); JSON lists every one of the files unless given"
-      )
-        |> cli.value_name("TOP")
-    )
+    |> walk_cli.with_top
     |> cli.with_option(
       cli.text_option_with_default(
         "sort-by",

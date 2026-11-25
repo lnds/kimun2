@@ -1,0 +1,16 @@
+const X : Int = if true { 1 } else { 2 }
+
+fn f(x: Int) : Int = match x {
+  0 -> 1
+  n if n > 0 and n < 10 -> 2
+  _ -> 3
+}
+
+fn g(o: Option[Int]) : Int {
+  let h = (y: Int) => if y > 0 or y < (-1) { y } else { 0 }
+  h(o ?? 0)
+}
+
+test "t" {
+  assert if f(1) == 2 { true } else { false }
+}

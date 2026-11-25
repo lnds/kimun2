@@ -1,0 +1,17 @@
+import km2.syntax
+import km2.syntax.{Trees}
+
+fn names_of(grammar: String, src: String) : [(String, Int)] / Ffi =
+  syntax.with_trees(
+    [(grammar, "cycom")],
+    () => (Trees.captures(grammar, "cycom", src) | (c => (c.name, c.row)))
+  )
+
+test "a query's captures come back named, with their rows" {
+  let src = "fn f(a: bool) -> i32 {\n    if a { 1 } else { 2 }\n}\n"
+  assert names_of("rust", src) == [("item", 0), ("function", 0), ("name", 0), ("branch", 1)]
+}
+
+test "a grammar without the query captures nothing" {
+  assert names_of("cobol", "x") == []
+}

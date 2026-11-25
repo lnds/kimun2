@@ -1,4 +1,5 @@
 import os.args
 import km2.cli
 
-fn main() : Int / Env + Stdout + Stderr + File + Process + Clock = args.argv() |> cli.run
+fn main() : Int / Env + Stdout + Stderr + File + Process + Clock + Ffi + Spawn =
+  args.argv() |> cli.run

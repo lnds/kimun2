@@ -146,7 +146,7 @@ fn run_loc(c: cli.Context) : Result[Unit, String] / File + Env + Process + Stdou
 }
 
 #[doc("The `loc` command, with `km loc`'s arguments and options.")]
-pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock] =
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
   cli.command("loc", "Count lines of code (blank, comment, code) by language", run_loc)
     |> walk_cli.with_common
     |> cli.with_option(

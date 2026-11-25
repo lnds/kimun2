@@ -1,0 +1,80 @@
+import fs.file
+import km2.cycom
+import km2.languages
+import km2.rust_tests
+import km2.syntax
+import km2.syntax.{Trees}
+
+const DIR : String = "fixtures/cycom"
+
+fn measured(name: String, grammar: String) : [(String, Int, Int)] / File + Ffi = match (
+  file.read("#{DIR}/#{name}"),
+  languages.by_name(name)
+) {
+  (Ok(src), Some(spec)) -> {
+    let tests = if spec.name == "Rust" { rust_tests.test_blocks(src) } else { [] }
+    let caps = syntax.with_trees([(grammar, "cycom")], () => Trees.captures(grammar, "cycom", src))
+    match cycom.analyze(name, spec.name, src, tests, caps) {
+      Some(f) -> f.functions | (g => (g.name, g.start_line, g.complexity))
+      None -> []
+    }
+  }
+  _ -> []
+}
+
+test "rust: arms but the catch-all, closures and nested functions in their function" {
+  assert measured("same/branches.rs", "rust") == [("<file>", 1, 2), ("m", 6, 6), ("top", 17, 6)]
+}
+
+test "elixir: each clause of a def, clause arrows but the catch-all" {
+  assert measured("same/branches.ex", "elixir")
+    == [("<file>", 1, 2), ("f", 4, 1), ("f", 5, 3), ("g", 12, 6)]
+}
+
+test "kaikai: a match counts once, a test block outside functions" {
+  assert measured("same/branches.kai", "kaikai") == [("<file>", 1, 3), ("f", 3, 4), ("g", 9, 4)]
+}
+
+# Where km2 reads the tree and km the text, and they part.
+
+test "rust: an empty closure and a reference pattern or type are no branch" {
+  assert measured("differ/closures.rs", "rust")
+    == [("fallback", 1, 1), ("spaces", 5, 1), ("first", 9, 1)]
+}
+
+test "rust: a function written in a macro_rules body is no function of the file" {
+  assert measured("differ/macros.rs", "rust") == [("<file>", 1, 3), ("check", 9, 1)]
+}
+
+test "rust: a signature over several lines keeps its body, a raw identifier its name" {
+  assert measured("differ/generics.rs", "rust") == [("from_iter", 1, 2), ("r#async", 11, 2)]
+}
+
+test "rust: the arms of a function on one line are branches" {
+  assert measured("differ/one_line.rs", "rust") == [("sign", 1, 4)]
+}
+
+test "kaikai: a head over several lines keeps its body in the function" {
+  assert measured("differ/heads.kai", "kaikai") == [("quoted", 1, 3), ("pick", 9, 2)]
+}
+
+test "elixir: the text of an interpolating sigil is no code" {
+  assert measured("differ/sigils.ex", "elixir") == [("check", 2, 1)]
+}
+
+test "elixir: a name keeps its ? or !" {
+  assert measured("differ/names.ex", "elixir") == [("valid?", 2, 2), ("fetch!", 6, 1)]
+}
+
+test "elixir: code interpolated in a string branches" {
+  assert measured("differ/interpolation.ex", "elixir") == [("greet", 2, 3)]
+}
+
+test "elixir: a clause of several patterns is no catch-all" {
+  assert measured("differ/clauses.ex", "elixir") == [("safe", 2, 3)]
+}
+
+test "kaikai: an extern has no body, and the functions after it are read" {
+  assert measured("differ/externs.kai", "kaikai")
+    == [("concat", 7, 1), ("same", 9, 1), ("pick", 11, 3)]
+}

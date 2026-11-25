@@ -1,0 +1,16 @@
+#[doc("Renders `n` in `radix`.")]
+extern "C"("int_to_radix") pub fn to_radix(
+  n: Int,
+  radix: Int
+) : String / Ffi
+
+pub fn concat(a: String, b: String) : String = string_concat(a, b)
+
+fn same(o: Option[Int]) : Option[Int] = o
+
+pub fn pick(o: Option[Int]) : Int = match same(
+  o
+) {
+  Some(x) if x > 0 -> x
+  _ -> 0
+}

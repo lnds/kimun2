@@ -1,0 +1,12 @@
+cycom fixtures/cycom/same
+cycom --per-function fixtures/cycom/same
+cycom --format json fixtures/cycom/same
+cycom --format short fixtures/cycom/same
+cycom --format terse fixtures/cycom/same
+cycom --format github fixtures/cycom/same
+cycom --format codeclimate fixtures/cycom/same
+cycom --sort-by max fixtures/cycom/same
+cycom --sort-by avg --format json fixtures/cycom/same
+cycom --min-complexity 4 --per-function fixtures/cycom/same
+cycom --top 1 fixtures/cycom/same
+cycom --format github --min-complexity 5 fixtures/cycom/same

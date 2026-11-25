@@ -3,6 +3,8 @@
 # end). The metrics of code leave them out.
 
 import fs.file
+import km2.content
+import km2.content.{CText, CBinary}
 import km2.selection
 
 const LOCK_FILES : [String] = [
@@ -99,3 +101,13 @@ pub fn is_generated(p: String) : Bool / File =
     or file.exists(p ++ ".map")
     or has_marker(file_head(p, 4096))
     or string.contains(file_tail(p), SOURCE_MAP)
+
+#[doc("The text of a file a metric of code reads: none for a binary or generated file, and none with a warning on stderr for one that cannot be read.")]
+pub fn code_text(p: String) : Option[String] / File + Stderr = match content.read(p) {
+  Err(e) -> {
+    Stderr.eprint("warning: #{e}")
+    None
+  }
+  Ok(CBinary(_)) -> None
+  Ok(CText(src)) -> if is_generated_text(p, src) { None } else { Some(src) }
+}
