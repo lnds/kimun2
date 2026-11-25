@@ -48,7 +48,7 @@ fn count(t: Tally, s: Source) : Tally / File + Stderr {
   let counted = Tally { ...t, text_files: t.text_files + 1 }
   match content.read(s.path) {
     Err(e) -> {
-      Stderr.eprint("warning: #{s.path}: #{e}")
+      Stderr.eprint("warning: #{e}")
       counted
     }
     Ok(CBinary(h)) ->

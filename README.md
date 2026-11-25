@@ -8,7 +8,7 @@ Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with eve
 
 ## Building
 
-Requires kaikai 0.199.2 (`.kaikai-version`), `km` and `jq` for the quality gate, and `git` for `loc --by-author`, `churn`, `age` and `authors`.
+Requires kaikai 0.201.0 (`.kaikai-version`), `km` and `jq` for the quality gate, and `git` for `loc --by-author`, `churn`, `age` and `authors`.
 
 ```sh
 make build   # ./km2
@@ -32,10 +32,7 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 
 | Behaviour | km | km2 | Upstream |
 |---|---|---|---|
-| A line whose only content is an invalid UTF-8 byte that kaikai decodes as whitespace (a stray `0x85`, a truncated `0xE9`) | code | blank | lnds/kaikai#3555 |
 | A command that fails (`--since 6x`, a path outside a repository) | `error: ...` | `Error: ...` | kaikailang-org/ahu#47 |
 | `churn`, `age`: a rename near the 50% similarity threshold | followed as libgit2 scores similarity | followed as `git log -M` scores it | km2 reads history through the `git` program; kaikai has no libgit2 binding. On `lnds/kaikai`, 5 of 879 files differ. |
 | `authors`: `last_active` of an author whose commits share one commit time | an older commit's author date (seen in `lnds/kimun` and `phoenixframework/phoenix`, one author each) | the newest commit's author date | libgit2's time sort leaves commits with the same commit time in no set order, so km may meet an older one first. |
-| A directory that cannot be read | warned about, with the OS error code | warned about, without the code | lnds/kaikai#3535 |
-| A file that cannot be read | `<path>: Permission denied (os error 13)` | `<path>: read_file: cannot open file` | lnds/kaikai#3535 |
 | An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |

@@ -8,7 +8,7 @@ Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con t
 
 ## Compilación
 
-Requiere kaikai 0.199.2 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`, `churn`, `age` y `authors`.
+Requiere kaikai 0.201.0 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`, `churn`, `age` y `authors`.
 
 ```sh
 make build   # ./km2
@@ -32,10 +32,7 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 
 | Comportamiento | km | km2 | Aguas arriba |
 |---|---|---|---|
-| Una línea cuyo único contenido es un byte UTF-8 inválido que kaikai decodifica como espacio (un `0x85` suelto, un `0xE9` truncado) | código | en blanco | lnds/kaikai#3555 |
 | Un comando que falla (`--since 6x`, una ruta fuera de un repositorio) | `error: ...` | `Error: ...` | kaikailang-org/ahu#47 |
 | `churn`, `age`: un renombre cerca del umbral de similitud del 50 % | lo sigue según puntúa libgit2 | lo sigue según puntúa `git log -M` | km2 lee la historia con el programa `git`; kaikai no tiene enlace a libgit2. En `lnds/kaikai`, difieren 5 de 879 archivos. |
 | `authors`: `last_active` de un autor cuyos commits comparten la fecha de commit | la fecha de autor de un commit anterior (visto en `lnds/kimun` y `phoenixframework/phoenix`, un autor en cada uno) | la fecha de autor del commit más nuevo | El orden por fecha de libgit2 deja sin orden fijo los commits con la misma fecha de commit, así que km puede encontrar antes uno más antiguo. |
-| Un directorio que no se puede leer | avisa, con el código de error del sistema | avisa, sin el código | lnds/kaikai#3535 |
-| Un archivo que no se puede leer | `<ruta>: Permission denied (os error 13)` | `<ruta>: read_file: cannot open file` | lnds/kaikai#3535 |
 | Un elemento desconocido en un `--kind` separado por comas (`code,nope`) | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#45 |
