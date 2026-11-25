@@ -6,13 +6,19 @@ import km2.lexical.bytes.{byte, at, is_word, count_run}
 
 # The text is read by byte offset; each run of code is copied whole.
 
-fn blank(s: String, from: Int, to: Int) : String =
-  string.split(string.slice(s, from, to - from), "\n")
-    | (part => string.repeat(" ", string.byte_length(part)))
-    |> string.join("\n")
-
 fn find_byte(s: String, i: Int, n: Int, b: Int) : Int =
   if i >= n { n } else if byte(s, i) == b { i } else { find_byte(s, i + 1, n, b) }
+
+fn blanked(s: String, from: Int, to: Int, acc: [String]) : String {
+  let nl = find_byte(s, from, to, 10)
+  if nl >= to {
+    string.string_concat_all(list.reverse([string.repeat(" ", to - from), ...acc]))
+  } else {
+    blanked(s, nl + 1, to, ["\n", string.repeat(" ", nl - from), ...acc])
+  }
+}
+
+fn blank(s: String, from: Int, to: Int) : String = blanked(s, from, to, [])
 
 fn block_end(s: String, i: Int, n: Int, depth: Int) : Int =
   if i >= n {
@@ -108,11 +114,13 @@ fn raw_piece(s: String, i: Int, n: Int) : Option[(String, Int)] {
 
 # One piece at `i`, given as its text and where the scan goes on, or none
 # when the byte is plain code.
-fn piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
-  comment_piece(s, i, n)
-    |> option.or_else(() => string_piece(s, i, n))
-    |> option.or_else(() => raw_piece(s, i, n))
-    |> option.or_else(() => quote_piece(s, i, n))
+fn piece(s: String, i: Int, n: Int) : Option[(String, Int)] = match byte(s, i) {
+  47 -> comment_piece(s, i, n)
+  34 -> string_piece(s, i, n)
+  114 -> raw_piece(s, i, n)
+  39 -> quote_piece(s, i, n)
+  _ -> None
+}
 
 fn quote_piece(s: String, i: Int, n: Int) : Option[(String, Int)] =
   if byte(s, i) != 39 {

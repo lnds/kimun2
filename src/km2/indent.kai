@@ -209,16 +209,23 @@ pub fn analyze(path: String, text_lines: [String], kinds: [LineKind]) : Option[F
   }
 }
 
-fn masked(kinds: [LineKind], blocks: [(Int, Int)]) : [LineKind] =
-  if blocks == [] {
-    kinds
-  } else {
-    list.enumerate(kinds)
-      | (p => {
-        let (i, k) = p
-        if list.any(blocks, b => i >= b.fst and i <= b.snd) { Blank } else { k }
-      })
+# Blocks come in line order and do not overlap.
+fn masked_from(kinds: [LineKind], blocks: [(Int, Int)], i: Int, acc: [LineKind]) : [LineKind] =
+  match (kinds, blocks) {
+    ([], _) -> list.reverse(acc)
+    (_, []) -> list.reverse(acc) ++ kinds
+    ([k, ...ks], [(from, to), ...bs]) ->
+      if i > to {
+        masked_from(kinds, bs, i, acc)
+      } else if i >= from {
+        masked_from(ks, blocks, i + 1, [Blank, ...acc])
+      } else {
+        masked_from(ks, blocks, i + 1, [k, ...acc])
+      }
   }
+
+fn masked(kinds: [LineKind], blocks: [(Int, Int)]) : [LineKind] =
+  if blocks == [] { kinds } else { masked_from(kinds, blocks, 0, []) }
 
 #[doc("A source's lines and their kinds as km's analyses read them: without the inline Rust test blocks when tests are left out.")]
 pub fn classified(spec: Spec, src: String, exclude_tests: Bool) : ([String], [LineKind]) {

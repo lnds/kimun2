@@ -4,6 +4,7 @@
 
 import path
 import km2.rust_literals
+import km2.lexical.bytes.{byte}
 
 type Ends = { braces: Int, parens: Int, where_clause: Bool }
 
@@ -16,27 +17,33 @@ fn close_brace(e: Ends, from: Int, at: Int) : Result[Ends, Int] =
     Ok(Ends { ...e, braces: e.braces - 1 })
   }
 
-fn after_char(c: Char, e: Ends, from: Int, at: Int) : Result[Ends, Int] = match c {
-  '(' -> Ok(Ends { ...e, parens: e.parens + 1 })
-  '[' -> Ok(Ends { ...e, parens: e.parens + 1 })
-  ')' -> Ok(Ends { ...e, parens: if e.parens > 0 { e.parens - 1 } else { 0 } })
-  ']' -> Ok(Ends { ...e, parens: if e.parens > 0 { e.parens - 1 } else { 0 } })
-  '{' -> Ok(Ends { ...e, braces: e.braces + 1 })
-  '}' -> close_brace(e, from, at)
-  _ -> Ok(e)
-}
+fn after_byte(e: Ends, b: Int) : Ends =
+  if b == 40 or b == 91 {
+    Ends { ...e, parens: e.parens + 1 }
+  } else if b == 41 or b == 93 {
+    Ends { ...e, parens: if e.parens > 0 { e.parens - 1 } else { 0 } }
+  } else if b == 123 {
+    Ends { ...e, braces: e.braces + 1 }
+  } else {
+    e
+  }
 
-# The depths after a line, or the line where the item ends on it.
-fn scan_line(cs: [Char], e: Ends, from: Int, at: Int) : Result[Ends, Int] = match cs {
-  [] -> Ok(e)
-  [c, ...rest] -> scan_line(rest, after_char(c, e, from, at)!, from, at)
-}
+# The depths after a line, or the line where the item ends on it. Only
+# brackets count, and they are ASCII, so the line is read by byte.
+fn scan_line(line: String, i: Int, n: Int, e: Ends, from: Int, at: Int) : Result[Ends, Int] =
+  if i >= n {
+    Ok(e)
+  } else if byte(line, i) == 125 {
+    scan_line(line, i + 1, n, close_brace(e, from, at)!, from, at)
+  } else {
+    scan_line(line, i + 1, n, after_byte(e, byte(line, i)), from, at)
+  }
 
 # Where the item starting at line `from` ends: its braces balanced, or
 # its `;` (or `,` outside a where clause) at depth zero.
 fn item_end(lines: [String], from: Int, at: Int, e: Ends) : Int = match lines {
   [] -> at - 1
-  [line, ...rest] -> match scan_line(string.chars(line), e, from, at) {
+  [line, ...rest] -> match scan_line(line, 0, string.byte_length(line), e, from, at) {
     Err(end) -> end
     Ok(after) -> {
       let w = after.where_clause or string.starts_with(string.trim_left(line), "where")
