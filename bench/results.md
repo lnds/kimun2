@@ -4,6 +4,21 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
+## `mi` over tree-sitter, Rust, Elixir and Kaikai, on kaikai 0.201.3 (out of budget on memory)
+
+`bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km mi --include-ext rs`, `ex` or `kai` and the same for km2, on a machine under load (load average 5.9). km 0.53.0. Inputs as for `hal` below: `lnds/kimun` at `8bb7886` (`src`, 261 files), `rust-lang/cargo` at `9b87fe4` (`src`, 253 files), `phoenixframework/phoenix` at `37d3421` (`lib`, 73 files), `plausible/analytics` at `e83d0ba` (`lib`, 536 files), the kaikai stdlib at `0990eea3e` (94 files) and km2's own `src`.
+
+| Input | km time | km RSS | km2 time | km2 RSS | time | RSS |
+|---|---|---|---|---|---|---|
+| `kimun/src` | 403 ms | 13.7 MB | 387 ms | 21.5 MB | 0.96× | 1.57× |
+| `cargo/src` | 808 ms | 14.7 MB | 658 ms | 30.9 MB | 0.81× | 2.10× |
+| `phoenix/lib` | 145 ms | 12.7 MB | 172 ms | 25.1 MB | 1.18× | 1.98× |
+| `plausible/lib` | 556 ms | 13.0 MB | 491 ms | 32.5 MB | 0.88× | 2.50× |
+| kaikai stdlib | 135 ms | 12.8 MB | 150 ms | 21.7 MB | 1.11× | 1.70× |
+| km2 `src` | 75 ms | 11.9 MB | 93 ms | 15.6 MB | 1.24× | 1.31× |
+
+Time is within budget; memory is not, and it is `hal`'s excess: `mi` holds a file's `hal` captures, the long list, and its `cycom` captures at once. Each file is parsed once and both queries run over the one tree: in the same session on `cargo/src`, km2 `hal` took 544 ms (27.1 MB) and `cycom` 315 ms (20.3 MB), 859 ms apart against 658 ms for `mi`; km took 577 ms, 388 ms and 808 ms.
+
 ## `hal` over tree-sitter, Rust, Elixir and Kaikai, on kaikai 0.201.3 (out of budget on memory)
 
 `bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km hal --include-ext rs`, `ex` or `kai` and the same for km2. Inputs: `lnds/kimun` at `8bb7886` (`src`, 261 files), `rust-lang/cargo` at `9b87fe4` (`src`, 253 files), `phoenixframework/phoenix` at `37d3421` (`lib`, 73 files), `plausible/analytics` at `e83d0ba` (`lib`, 536 files), the kaikai stdlib at `0990eea3e` (94 files) and km2's own `src`.
