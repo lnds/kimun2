@@ -12,6 +12,7 @@ pub type Capture = { name: String, row: Int, from: Int, to: Int }
 #[doc("Parsed sources, answered by `with_trees`.")]
 pub effect Trees {
   captures(grammar: String, query: String, src: String) : [Capture]
+  captures_each(grammar: String, queries: [String], src: String) : [[Capture]]
 }
 
 #[doc("The grammar km2 parses a language with, by the language's name, when it vendors one.")]
@@ -57,14 +58,15 @@ effect Parsed {
   doc() : ts.Doc
 }
 
-# The captures of one source, its tree freed on every way out.
-fn parsed(c: Compiled, src: String) : [Capture] / Ffi =
+# The captures of one source for each query, from one parse; its tree
+# freed on every way out.
+fn parsed(grammar: String, queries: [Compiled], src: String) : [[Capture]] / Ffi =
   handle {
     let d = Parsed.doc()
-    found(d, c.names, ts.run(d, c.query) - 1, [])
+    queries | (c => found(d, c.names, ts.run(d, c.query) - 1, []))
   } with Parsed {
     initially {
-      ts.parse(c.grammar, src)
+      ts.parse(grammar, src)
     }
     finally {
       ts.free(state)
@@ -73,12 +75,22 @@ fn parsed(c: Compiled, src: String) : [Capture] / Ffi =
     return(x) -> x
   }
 
-fn lookup(all: [Compiled], grammar: String, query_name: String) : Option[Compiled] =
-  all |> list.find(c => c.grammar == grammar and c.query_name == query_name)
+fn lookup(all: [Compiled], grammar: String, query_name: String) : [Compiled] =
+  all |? (c => c.grammar == grammar and c.query_name == query_name) |> list.take(1)
+
+# A source is parsed only when every query asked of it was compiled.
+fn each(all: [Compiled], grammar: String, queries: [String], src: String) : [[Capture]] / Ffi {
+  let wanted = queries || (q => lookup(all, grammar, q))
+  if list.length(wanted) == list.length(queries) {
+    parsed(grammar, wanted, src)
+  } else {
+    list.repeat([], list.length(queries))
+  }
+}
 
 fn free_all(all: [Compiled]) : Unit / Ffi = all |! (c => ts.query_free(c.query))
 
-#[doc("Runs `body` with `Trees` answered by tree-sitter: each `(grammar, query)` pair is compiled once and freed when `body` is done; a pair not compiled captures nothing.")]
+#[doc("Runs `body` with `Trees` answered by tree-sitter: each `(grammar, query)` pair is compiled once and freed when `body` is done; a pair not compiled captures nothing. `captures_each` answers several queries from one parse, in their order.")]
 pub fn with_trees[r, e](wanted: [(String, String)], body: () -> r / Trees + e) : r / Ffi + e =
   handle {
     body()
@@ -89,9 +101,8 @@ pub fn with_trees[r, e](wanted: [(String, String)], body: () -> r / Trees + e) :
     finally {
       free_all(state)
     }
-    captures(grammar, query, src, resume) -> resume(match lookup(state, grammar, query) {
-      Some(c) -> parsed(c, src)
-      None -> []
-    })
+    captures(grammar, query, src, resume) ->
+      resume(list.head(each(state, grammar, [query], src)) ?? [])
+    captures_each(grammar, queries, src, resume) -> resume(each(state, grammar, queries, src))
     return(x) -> x
   }

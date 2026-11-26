@@ -18,11 +18,19 @@ import km2.walk_cli.{Common}
 
 const QUERY : String = "cycom"
 
+#[doc("The line ranges of a file the analysis leaves out: its inline Rust test blocks, unless tests are included.")]
+pub fn tests_left_out(w: Common, p: Parsed) : [(Int, Int)] =
+  if w.exclude_tests and p.spec.name == "Rust" { rust_tests.test_blocks(p.src) } else { [] }
+
 fn of_text(w: Common, repo: Option[git.Repo], p: Parsed) : [FileCycom] / Trees {
-  let tests =
-    if w.exclude_tests and p.spec.name == "Rust" { rust_tests.test_blocks(p.src) } else { [] }
   let caps = Trees.captures(p.grammar, QUERY, p.src)
-  match cycom.analyze(indent.shown(repo, w.root, p.source.path), p.spec.name, p.src, tests, caps) {
+  match cycom.analyze(
+    indent.shown(repo, w.root, p.source.path),
+    p.spec.name,
+    p.src,
+    tests_left_out(w, p),
+    caps
+  ) {
     Some(f) -> [f]
     None -> []
   }

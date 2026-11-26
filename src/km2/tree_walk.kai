@@ -1,6 +1,6 @@
 # The walk of the commands that read a syntax tree: each code file of a
-# language with a grammar is parsed with one query, in parts on fibers
-# of their own, and measured by the command.
+# language with a grammar is parsed once for the command's queries, in
+# parts on fibers of their own, and measured by the command.
 
 import spawn
 import km2.generated
@@ -14,20 +14,24 @@ import km2.syntax.{Trees}
 #[doc("What a command measures in one file: its source, its language refined by content, its grammar and its text.")]
 pub type Parsed = { source: Source, spec: Spec, grammar: String, src: String }
 
-# The grammar a file is parsed with, when the query is written for it: a
-# file of a language the command does not measure is not parsed.
-fn grammar_for(language: String, query: String) : Option[String] =
+# The grammar a file is parsed with, when every query is written for it:
+# a file of a language the command does not measure is not parsed.
+fn grammar_for(language: String, wanted: [String]) : Option[String] =
   match syntax.grammar_of(language) {
-    Some(g) -> if queries.source(g, query) == "" { None } else { Some(g) }
+    Some(g) -> if list.any(wanted, q => queries.source(g, q) == "") { None } else { Some(g) }
     None -> None
   }
 
-fn measure[r](s: Source, query: String, f: (Parsed) -> [r] / Trees) : [r] / File + Stderr + Trees =
+fn measure[r](
+  s: Source,
+  wanted: [String],
+  f: (Parsed) -> [r] / Trees
+) : [r] / File + Stderr + Trees =
   match generated.code_text(s.path) {
     None -> []
     Some(src) -> {
       let spec = languages.refine(s.path, s.spec, src)
-      match grammar_for(spec.name, query) {
+      match grammar_for(spec.name, wanted) {
         None -> []
         Some(g) -> f(Parsed { source: s, spec: spec, grammar: g, src: src })
       }
@@ -36,22 +40,22 @@ fn measure[r](s: Source, query: String, f: (Parsed) -> [r] / Trees) : [r] / File
 
 # The grammars a part needs: compiling a query costs as much as parsing
 # a large file.
-fn grammars(part: [Source], query: String) : [String] =
+fn grammars(part: [Source], wanted: [String]) : [String] =
   part
-    || (s => match grammar_for(s.spec.name, query) {
+    || (s => match grammar_for(s.spec.name, wanted) {
       Some(g) -> [g]
       None -> []
     })
     |> list.uniq
 
 fn measured_part[r](
-  query: String,
+  wanted: [String],
   part: [Source],
   f: (Parsed) -> [r] / Trees
 ) : [r] / File + Stderr + Ffi =
   syntax.with_trees(
-    grammars(part, query) | (g => (g, query)),
-    () => (part || (s => measure(s, query, f)))
+    grammars(part, wanted) || (g => (wanted | (q => (g, q)))),
+    () => (part || (s => measure(s, wanted, f)))
   )
 
 # Fibers that parse at once, each with its own queries.
@@ -64,16 +68,23 @@ fn parts(xs: [Source], size: Int, acc: [[Source]]) : [[Source]] =
     parts(list.drop(xs, size), size, [list.take(xs, size), ...acc])
   }
 
-#[doc("What `f` measures in each file, the files parsed with `query` in consecutive parts on fibers of their own; the results come back in walk order.")]
+#[doc("What `f` measures in each file with one query; see `measured_each`.")]
 pub fn measured[r](
   query: String,
+  files: [Source],
+  f: (Parsed) -> [r] / Trees
+) : [r] / File + Stderr + Ffi + Spawn = measured_each([query], files, f)
+
+#[doc("What `f` measures in each file of a language every query in `wanted` is written for, the files read in consecutive parts on fibers of their own; the results come back in walk order.")]
+pub fn measured_each[r](
+  wanted: [String],
   files: [Source],
   f: (Parsed) -> [r] / Trees
 ) : [r] / File + Stderr + Ffi + Spawn {
   let size = (list.length(files) + PARTS - 1) / PARTS
   nursery { n ->
     let fibers = parts(files, if size > 0 { size } else { 1 }, [])
-      | (p => n.spawn(() => measured_part(query, p, f)))
+      | (p => n.spawn(() => measured_part(wanted, p, f)))
     fibers || (fb => n.await(fb))
   }
 }
