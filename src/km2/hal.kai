@@ -1,0 +1,95 @@
+# `hal`: Halstead's measures of a file, from the captures of its `hal`
+# query: each `@operator` and `@operand` on a code line, told apart by
+# its text.
+
+import collections.set
+import km2.lines.{LineKind, Code}
+import km2.syntax.{Capture}
+
+#[doc("A file's Halstead counts and the measures derived from them.")]
+pub type FileHal = {
+  path: String,
+  language: String,
+  distinct_operators: Int,
+  distinct_operands: Int,
+  total_operators: Int,
+  total_operands: Int,
+  vocabulary: Int,
+  length: Int,
+  volume: Real,
+  difficulty: Real,
+  effort: Real,
+  bugs: Real,
+  time: Real
+}
+
+# The captures on code lines: `kinds` holds a kind per row from `row`
+# on, and the captures come sorted by row.
+fn on_code(caps: [Capture], kinds: [LineKind], row: Int, acc: [Capture]) : [Capture] =
+  match (caps, kinds) {
+    ([], _) -> acc
+    (_, []) -> acc
+    ([c, ...cs], [k, ...ks]) ->
+      if c.row > row {
+        on_code(caps, ks, row + 1, acc)
+      } else if k == Code {
+        on_code(cs, kinds, row, [c, ...acc])
+      } else {
+        on_code(cs, kinds, row, acc)
+      }
+  }
+
+fn by_start(a: Capture, b: Capture) : Int = a.from - b.from
+
+fn text_of(src: String, c: Capture) : String = string.slice(src, c.from, c.to - c.from)
+
+fn texts(caps: [Capture], src: String, name: String) : [String] =
+  caps |? (c => c.name == name) | (c => text_of(src, c))
+
+fn real(n: Int) : Real = int_to_real(n)
+
+#[doc("Halstead's measures from the operators and operands of a file, by text; none unless it has both.")]
+pub fn measures(path: String, language: String, operators: [String], operands: [String]) : Option[
+  FileHal
+] {
+  let n1 = set.size(set.from(operators))
+  let n2 = set.size(set.from(operands))
+  if n1 == 0 or n2 == 0 {
+    None
+  } else {
+    let big_n1 = list.length(operators)
+    let big_n2 = list.length(operands)
+    let volume = real(big_n1 + big_n2) * real_log2(real(n1 + n2))
+    let difficulty = real(n1) / 2.0 * (real(big_n2) / real(n2))
+    let effort = difficulty * volume
+    Some(FileHal {
+      path: path,
+      language: language,
+      distinct_operators: n1,
+      distinct_operands: n2,
+      total_operators: big_n1,
+      total_operands: big_n2,
+      vocabulary: n1 + n2,
+      length: big_n1 + big_n2,
+      volume: volume,
+      difficulty: difficulty,
+      effort: effort,
+      bugs: volume / 3000.0,
+      time: effort / 18.0
+    })
+  }
+}
+
+#[doc("A file's Halstead measures from its query captures, its source and the kind of each of its lines; none when it has no operator or no operand on a code line.")]
+pub fn analyze(
+  caps: [Capture],
+  src: String,
+  kinds: [LineKind],
+  path: String,
+  language: String
+) : Option[
+  FileHal
+] {
+  let kept = on_code(list.sort_by(caps, by_start), kinds, 0, [])
+  measures(path, language, texts(kept, src, "operator"), texts(kept, src, "operand"))
+}

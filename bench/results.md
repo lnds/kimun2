@@ -4,6 +4,17 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
+## `hal` over tree-sitter, Rust, on kaikai 0.201.3 (out of budget on memory)
+
+`bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km hal --include-ext rs` and the same for km2. Inputs: `lnds/kimun` at `8bb7886` (`src`, 261 files) and `rust-lang/cargo` at `9b87fe4` (`src`, 253 files).
+
+| Input | km time | km RSS | km2 time | km2 RSS | time | RSS |
+|---|---|---|---|---|---|---|
+| `kimun/src` | 304 ms | 13.3 MB | 409 ms | 20.0 MB | 1.35× | 1.50× |
+| `cargo/src` | 589 ms | 14.7 MB | 736 ms | 26.3 MB | 1.25× | 1.79× |
+
+Time is within budget; memory is not. On the same input `cycom` is within it (`cargo/src`: km 396 ms and 15.2 MB, km2 323 ms and 20.4 MB, 1.34×), so the excess is `hal`'s own: the query captures nearly every token, and each file's captures are a list of records many times longer than `cycom`'s.
+
 ## `cycom` over tree-sitter, on kaikai 0.201.0 (current, out of budget on memory)
 
 `/usr/bin/time -l`, the median of three runs, on a machine under load (load average 6), so instructions retired are the steadier figure. `km cycom` with `--include-ext` for the languages km2 parses. Inputs: ten copies of ripgrep's crates (`rg10`, 780 Rust files), ripgrep, phoenix (Elixir) and the kaikai 0.200.2 stdlib with km2's own `src`.

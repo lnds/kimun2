@@ -1,0 +1,93 @@
+import fs.file
+import km2.hal
+import km2.hal_report
+import km2.indent
+import km2.languages
+import km2.syntax
+import km2.syntax.{Trees}
+
+const DIR : String = "fixtures/hal"
+
+# Distinct operators and operands, then total operators and operands.
+fn counts(name: String, grammar: String) : (Int, Int, Int, Int) / File + Ffi = match (
+  file.read("#{DIR}/#{name}"),
+  languages.by_name(name)
+) {
+  (Ok(src), Some(spec)) -> {
+    let (_, kinds) = indent.classified(spec, src, true)
+    let caps = syntax.with_trees([(grammar, "hal")], () => Trees.captures(grammar, "hal", src))
+    match hal.analyze(caps, src, kinds, name, spec.name) {
+      Some(f) -> (f.distinct_operators, f.distinct_operands, f.total_operators, f.total_operands)
+      None -> (0, 0, 0, 0)
+    }
+  }
+  _ -> (-1, -1, -1, -1)
+}
+
+test "rust: keywords and symbols are operators, names and numbers operands, tests left out" {
+  assert counts("same/basics.rs", "rust") == ((35, 43, 169, 77))
+}
+
+# Where km2 reads the tree and km the text, and they part.
+
+test "rust: the `>>` that closes nested generics is two `>`" {
+  assert counts("differ/generics.rs", "rust") == ((15, 8, 29, 10))
+}
+
+test "rust: `&&` in a reference type or pattern is two `&`" {
+  assert counts("differ/references.rs", "rust") == ((13, 7, 28, 9))
+}
+
+test "rust: the bars of a closure without parameters are two `|`" {
+  assert counts("differ/closures.rs", "rust") == ((10, 4, 13, 5))
+}
+
+test "rust: a real is one operand" {
+  assert counts("differ/numbers.rs", "rust") == ((13, 6, 18, 10))
+}
+
+test "rust: a byte literal counts nothing, as a string does" {
+  assert counts("differ/bytes.rs", "rust") == ((8, 2, 9, 4))
+}
+
+test "rust: a raw identifier is one operand" {
+  assert counts("differ/raw_names.rs", "rust") == ((8, 3, 10, 4))
+}
+
+test "rust: `macro_rules!` declares, and a macro's `$self` is an operand" {
+  assert counts("differ/macros.rs", "rust") == ((10, 6, 19, 9))
+}
+
+test "a file needs operators and operands" {
+  assert hal.measures("f", "Rust", ["+"], []) == None
+  assert hal.measures("f", "Rust", [], ["x"]) == None
+}
+
+test "volume, difficulty, effort, bugs and time follow Halstead" {
+  match hal.measures("f", "Rust", ["=", "+", "="], ["x", "y", "x", "1"]) {
+    Some(m) -> {
+      assert ((m.distinct_operators, m.distinct_operands, m.vocabulary, m.length)) == ((2, 3, 5, 7))
+      assert m.volume == 7.0 * real_log2(5.0)
+      assert m.difficulty == 2.0 / 2.0 * (4.0 / 3.0)
+      assert m.effort == m.difficulty * m.volume
+      assert m.bugs == m.volume / 3000.0
+      assert m.time == m.effort / 18.0
+    }
+    None -> {
+      assert false
+    }
+  }
+}
+
+test "a duration is written in its largest unit" {
+  assert hal_report.duration(45.4) == "45s"
+  assert hal_report.duration(200.0) == "3m 20s"
+  assert hal_report.duration(119.6) == "1m 60s"
+  assert hal_report.duration(8100.0) == "2h 15m"
+  assert hal_report.duration(100800.0) == "1d 4h"
+}
+
+test "no files sum to km's negative zero" {
+  assert hal_report.short([]) == "hal files:0 vol:-0.0 effort:-0.0 bugs:-0.0"
+  assert hal_report.terse([]) == "-0.0"
+}

@@ -1,0 +1,72 @@
+# The `hal` command: walks the code files, parses those of a language
+# with a grammar, and reports their Halstead measures as km does.
+
+import ahu.cli
+import km2.churn
+import km2.git
+import km2.hal
+import km2.hal.{FileHal}
+import km2.hal_report
+import km2.history_report
+import km2.indent
+import km2.syntax.{Trees}
+import km2.tree_walk
+import km2.tree_walk.{Parsed}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+const QUERY : String = "hal"
+
+fn of_text(w: Common, repo: Option[git.Repo], p: Parsed) : [FileHal] / Trees {
+  let (_, kinds) = indent.classified(p.spec, p.src, w.exclude_tests)
+  let caps = Trees.captures(p.grammar, QUERY, p.src)
+  match hal.analyze(caps, p.src, kinds, indent.shown(repo, w.root, p.source.path), p.spec.name) {
+    Some(f) -> [f]
+    None -> []
+  }
+}
+
+fn descending(a: Real, b: Real) : Int = if a > b { -1 } else if a < b { 1 } else { 0 }
+
+#[doc("Files by `--sort-by`: effort (the default), volume or bugs, highest first, ties in walk order.")]
+pub fn sorted(files: [FileHal], by: String) : [FileHal] = match by {
+  "volume" -> files |> list.sort_by((a, b) => descending(a.volume, b.volume))
+  "bugs" -> files |> list.sort_by((a, b) => descending(a.bugs, b.bugs))
+  _ -> files |> list.sort_by((a, b) => descending(a.effort, b.effort))
+}
+
+fn render(c: cli.Context, format: String, files: [FileHal]) : Result[Unit, String] / Stdout {
+  let shown = history_report.shown_count(format, cli.integer(c, "top"), list.length(files))
+  match format {
+    "json" -> Ok(Stdout.print(hal_report.to_json(list.take(files, shown))))
+    "short" -> Ok(Stdout.print(hal_report.short(files)))
+    "terse" -> Ok(Stdout.print(hal_report.terse(files)))
+    "table" -> Ok(Stdout.print(hal_report.table(files, shown)))
+    _ -> Err(history_report.CI_FORMAT_ONLY)
+  }
+}
+
+fn run_hal(
+  c: cli.Context
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn =
+  walk_cli.walking(c, (cfg, w) => {
+    let repo = ok(git.discover(w.root))
+    let files =
+      tree_walk.measured(QUERY, churn.measured_files(w, cfg.separate), p => of_text(w, repo, p))
+    render(c, w.format, sorted(files, cli.text(c, "sort-by") ?? "effort"))
+  })
+
+#[doc("The `hal` command, with `km hal`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
+  cli.command("hal", "Analyze Halstead complexity metrics per file", run_hal)
+    |> walk_cli.with_common
+    |> walk_cli.with_top
+    |> cli.with_option(
+      cli.text_option_with_default(
+        "sort-by",
+        "Sort by metric: effort, volume, or bugs (default: effort)",
+        "effort"
+      )
+        |> cli.value_name("SORT_BY")
+        |> cli.choices(["effort", "volume", "bugs"])
+    )

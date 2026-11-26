@@ -1,0 +1,13 @@
+hal fixtures/hal/same
+hal --format json fixtures/hal/same
+hal --format short fixtures/hal/same
+hal --format terse fixtures/hal/same
+hal --sort-by volume fixtures/hal/same
+hal --sort-by bugs --format json fixtures/hal/same
+hal --include-tests fixtures/hal/same
+hal --top 1 fixtures/hal/same
+hal --top 1 --format json fixtures/hal/same
+hal fixtures/lang/css
+hal --format short fixtures/lang/css
+hal --format terse fixtures/lang/css
+hal --format json fixtures/lang/css

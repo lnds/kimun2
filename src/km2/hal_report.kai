@@ -1,0 +1,133 @@
+# The outputs of `km hal`: table, JSON and the one-line summaries.
+
+import math.real
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
+import text
+import km2.hal.{FileHal}
+import km2.history_report
+
+fn pad(s: String, width: Int) : String = s ++ string.repeat(" ", width - text.display_width(s))
+
+fn right(s: String, width: Int) : String = string.repeat(" ", width - text.display_width(s)) ++ s
+
+fn fixed(x: Real, digits: Int) : String = real.to_fixed(x, digits)
+
+fn whole(x: Real) : String = fixed(x, 0)
+
+#[doc("A duration in seconds in its largest unit: `45s`, `3m 20s`, `2h 15m`, `1d 4h`.")]
+pub fn duration(seconds: Real) : String =
+  if seconds < 60.0 {
+    "#{whole(seconds)}s"
+  } else if seconds < 3600.0 {
+    "#{whole(real.floor(seconds / 60.0))}m #{whole(real.round(seconds % 60.0))}s"
+  } else if seconds < 86400.0 {
+    "#{whole(real.floor(seconds / 3600.0))}h #{whole(real.round(seconds % 3600.0 / 60.0))}m"
+  } else {
+    "#{whole(real.floor(seconds / 86400.0))}d #{whole(real.round(seconds % 86400.0 / 3600.0))}h"
+  }
+
+fn sum(files: [FileHal], f: (FileHal) -> Real) : Real =
+  files |> list.foldl(0.0, (s, x) => s + f(x))
+
+fn total_n(files: [FileHal], f: (FileHal) -> Int) : Int =
+  files |> list.foldl(0, (s, x) => s + f(x))
+
+fn total_label(all: Int, shown: Int) : String =
+  if shown < all { " Total (#{all} files, #{shown} shown)" } else { " Total (#{all} files)" }
+
+fn widest(paths: [String]) : Int =
+  paths
+    |> list.foldl(4, (w, s) => {
+      let n = text.display_width(s)
+      if n > w { n } else { w }
+    })
+
+fn columns(
+  n1: String,
+  n2: String,
+  big_n1: String,
+  big_n2: String,
+  rest: (String, String, String, String)
+) : String {
+  let (volume, effort, bugs, time) = rest
+  "#{right(n1, 4)} #{right(n2, 4)} #{right(big_n1, 5)} #{right(big_n2, 5)} #{right(volume, 9)} #{right(effort, 10)} #{right(bugs, 6)} #{right(time, 8)}"
+}
+
+fn row(f: FileHal, w: Int) : String =
+  " #{pad(f.path, w)}  "
+    ++ columns(
+      "#{f.distinct_operators}",
+      "#{f.distinct_operands}",
+      "#{f.total_operators}",
+      "#{f.total_operands}",
+      (fixed(f.volume, 1), whole(f.effort), fixed(f.bugs, 2), duration(f.time))
+    )
+
+fn totals(files: [FileHal], shown: Int, w: Int) : String =
+  pad(total_label(list.length(files), shown), w + 1)
+    ++ "  "
+    ++ columns(
+      "",
+      "",
+      "#{total_n(files, .total_operators)}",
+      "#{total_n(files, .total_operands)}",
+      (
+        fixed(sum(files, .volume), 1),
+        whole(sum(files, .effort)),
+        fixed(sum(files, .bugs), 2),
+        duration(sum(files, .time))
+      )
+    )
+
+#[doc("The table of `km hal`: the first `shown` files, totals over all.")]
+pub fn table(files: [FileHal], shown: Int) : String =
+  if files == [] {
+    "No recognized source files found."
+  } else {
+    let rows = list.take(files, shown)
+    let w = widest(rows | .path)
+    let rule = history_report.rule(if w + 72 > 88 { w + 72 } else { 88 })
+    [
+      "Halstead Complexity Metrics",
+      rule,
+      " #{pad("File", w)}  "
+        ++ columns("η₁", "η₂", "N₁", "N₂", ("Volume", "Effort", "Bugs", "Time")),
+      rule,
+      ...rows | (f => row(f, w)),
+      rule,
+      totals(files, shown, w)
+    ]
+      |> string.join("\n")
+  }
+
+fn entry(f: FileHal) : JsonValue =
+  JObj([
+    ("path", JStr(f.path)),
+    ("language", JStr(f.language)),
+    ("distinct_operators", JNum(f.distinct_operators)),
+    ("distinct_operands", JNum(f.distinct_operands)),
+    ("total_operators", JNum(f.total_operators)),
+    ("total_operands", JNum(f.total_operands)),
+    ("vocabulary", JNum(f.vocabulary)),
+    ("length", JNum(f.length)),
+    ("volume", JReal(f.volume)),
+    ("difficulty", JReal(f.difficulty)),
+    ("effort", JReal(f.effort)),
+    ("bugs", JReal(f.bugs)),
+    ("time", JReal(f.time))
+  ])
+
+#[doc("The JSON of `km hal`: one entry per file.")]
+pub fn to_json(files: [FileHal]) : String = json.json_encode_pretty(JArr(files | entry), 2)
+
+# km sums no files to negative zero, and prints its sign.
+fn summed(files: [FileHal], f: (FileHal) -> Real) : String =
+  if files == [] { "-0.0" } else { fixed(sum(files, f), 1) }
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(files: [FileHal]) : String =
+  "hal files:#{list.length(files)} vol:#{summed(files, .volume)} effort:#{summed(files, .effort)} bugs:#{summed(files, .bugs)}"
+
+#[doc("The total effort of `--format terse`.")]
+pub fn terse(files: [FileHal]) : String = summed(files, .effort)

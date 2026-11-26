@@ -4,7 +4,7 @@ Métricas de código sobre árboles de sintaxis: el sucesor de [km (Kimün)](htt
 
 km2 apunta a reemplazar a `km` sin cambios para quien lo usa: los mismos comandos, flags, formatos de salida, esquema JSON y `.kimun.toml`, con mejores mediciones donde un árbol de sintaxis ve lo que una lectura léxica no alcanza. Hasta llegar a la paridad, `km` sigue siendo la herramienta a usar.
 
-Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con todas las opciones y formatos de sus pares en `km`. `cycom` está portado para Rust, Elixir y Kaikai, los lenguajes que km2 analiza; `km cycom` mide además una treintena de lenguajes que km2 deja fuera hasta incorporar sus gramáticas. Los demás comandos todavía no están implementados.
+Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con todas las opciones y formatos de sus pares en `km`. `cycom` está portado para Rust, Elixir y Kaikai, los lenguajes que km2 analiza, y `hal` para Rust; `km cycom` y `km hal` miden además una treintena de lenguajes que km2 deja fuera hasta incorporar sus gramáticas. Los demás comandos todavía no están implementados.
 
 ## Compilación
 
@@ -21,7 +21,7 @@ El corpus de lenguajes, `tests/corpus/repos.tsv`, lista dos repositorios reales 
 
 ## km frente a km2
 
-Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Cada uno está fijado por un fixture en `fixtures/cycom/differ`; `fixtures/cycom/same` reúne lo que ambos informan igual.
+Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Cada uno está fijado por un fixture en `fixtures/<comando>/differ`; `fixtures/<comando>/same` reúne lo que ambos informan igual.
 
 | Comando | Campo | km | km2 | Razón |
 |---|---|---|---|---|
@@ -35,6 +35,12 @@ Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Cada 
 | `cycom` | `complexity` | ninguna rama por el código interpolado en un string de Elixir (`"#{a \|\| b}"`) | sus ramas | El código interpolado se ejecuta. La documentación (`@doc`, `@moduledoc`, `@typedoc`) sigue sin contar. |
 | `cycom` | `complexity` | una cláusula de Elixir cuyo último patrón es `_` (`:exit, _ ->`) tomada por comodín | una rama | Solo una cláusula del patrón único `_` acepta cualquier valor. |
 | `cycom` | `functions` | una declaración `extern` de kaikai en varias líneas como función, y las funciones de una línea que la siguen, perdidas | las funciones con cuerpo | Un `extern` no tiene cuerpo. |
+| `hal` | `*_operators` | un `>>` donde cierran genéricos anidados (`Box<dyn Error>>`) | dos `>` | Cada `>` cierra un genérico; ninguno desplaza. |
+| `hal` | `*_operators` | un `&&` en un tipo o patrón de referencia (`&&str`, `\|&&c\|`) y un `\|\|` por las barras de una clausura sin parámetros | dos `&`, dos `\|` | Ninguno es un operador booleano: el árbol distingue una referencia y una clausura de uno. |
+| `hal` | `*_operators`, `*_operands` | un real partido en su punto o signo (`0.5`, `1e-6`: dos operandos y un operador) | un operando | Un real es un solo literal. |
+| `hal` | `*_operands` | la `b` de un literal de bytes (`b'('`, `b"x"`) | ninguno, como para cualquier string o carácter | El prefijo es parte del literal. |
+| `hal` | `*_operators`, `*_operands` | un identificador crudo leído como `r`, `#` y una palabra clave (`r#as`) | un operando | El nombre como está escrito. |
+| `hal` | `*_operators`, `*_operands` | `macro_rules!` como operando y `!`; el `$self` de una macro como nada | nada por `macro_rules!`, como por `fn`; `$self` un operando | `macro_rules!` declara una macro; `$self` es una variable de macro, no `self`. |
 
 ## Brechas conocidas
 
@@ -46,3 +52,4 @@ Donde km2 todavía no se comporta como `km` porque a kaikai o a ahu le falta alg
 | `churn`, `age`: un renombre cerca del umbral de similitud del 50 % | lo sigue según puntúa libgit2 | lo sigue según puntúa `git log -M` | km2 lee la historia con el programa `git`; kaikai no tiene enlace a libgit2. En `lnds/kaikai`, difieren 5 de 879 archivos. |
 | `authors`: `last_active` de un autor cuyos commits comparten la fecha de commit | la fecha de autor de un commit anterior (visto en `lnds/kimun` y `phoenixframework/phoenix`, un autor en cada uno) | la fecha de autor del commit más nuevo | El orden por fecha de libgit2 deja sin orden fijo los commits con la misma fecha de commit, así que km puede encontrar antes uno más antiguo. |
 | Un elemento desconocido en un `--kind` separado por comas (`code,nope`) | `error: ...`, sale con 2 | `Error: ...`, sale con 1 | kaikailang-org/ahu#45 |
+| `hal`: el separador de una repetición de macro (la `,` de `$($x),*`) | un operador | nada | tree-sitter-rust lee el separador como un token oculto, que ninguna consulta alcanza. |

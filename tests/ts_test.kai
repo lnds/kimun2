@@ -37,6 +37,14 @@ test "the shim evaluates #eq? on captured text" {
   assert captures("kaikai", "#[doc(\"x\")]\n#[constructor]\nfn f() : Int = 1\n", q) == 2
 }
 
+test "the shim evaluates #any-of? and #not-any-of? on captured text" {
+  let src = "fn f(a: Int, b: String, c: Box) : Int = 1\n"
+  let q = "((type_identifier) @t (#any-of? @t \"Int\" \"Box\"))"
+  assert captures("kaikai", src, q) == 3
+  let none = "((type_identifier) @t (#not-any-of? @t \"Int\" \"Box\"))"
+  assert captures("kaikai", src, none) == 1
+}
+
 fn spans(d: ts.Doc, k: Int, acc: [(Int, Int, Int)]) : [(Int, Int, Int)] / Ffi =
   if k < 0 {
     acc

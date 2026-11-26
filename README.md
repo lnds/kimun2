@@ -4,7 +4,7 @@ Code metrics over syntax trees: the successor of [km (Kimün)](https://github.co
 
 km2 aims to be a drop-in replacement for `km`: the same commands, flags, output formats, JSON schema and `.kimun.toml`, with better measurements wherever a syntax tree sees what a lexical reader cannot. Until it reaches parity, `km` remains the tool to use.
 
-Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom` is ported for Rust, Elixir and Kaikai, which km2 parses; `km cycom` also measures some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
+Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom` is ported for Rust, Elixir and Kaikai, which km2 parses, and `hal` for Rust; `km cycom` and `km hal` also measure some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
 
 ## Building
 
@@ -21,7 +21,7 @@ The language corpus, `tests/corpus/repos.tsv`, lists two real repositories per l
 
 ## km vs km2
 
-Every value km2 reports differently from `km` because it measures better, and why. Each is pinned by a fixture in `fixtures/cycom/differ`; `fixtures/cycom/same` holds what both report alike.
+Every value km2 reports differently from `km` because it measures better, and why. Each is pinned by a fixture in `fixtures/<command>/differ`; `fixtures/<command>/same` holds what both report alike.
 
 | Command | Field | km | km2 | Reason |
 |---|---|---|---|---|
@@ -35,6 +35,12 @@ Every value km2 reports differently from `km` because it measures better, and wh
 | `cycom` | `complexity` | no branch for code interpolated in an Elixir string (`"#{a \|\| b}"`) | its branches | Interpolated code runs. Documentation (`@doc`, `@moduledoc`, `@typedoc`) still counts nothing. |
 | `cycom` | `complexity` | an Elixir clause whose last pattern is `_` (`:exit, _ ->`) taken for a catch-all | a branch | Only a clause of the single pattern `_` matches anything. |
 | `cycom` | `functions` | a kaikai `extern` declaration over several lines as a function, and the one-line functions after it missed | the functions with a body | An `extern` has no body. |
+| `hal` | `*_operators` | one `>>` where nested generics close (`Box<dyn Error>>`) | two `>` | Each `>` closes a generic; neither shifts. |
+| `hal` | `*_operators` | one `&&` in a reference type or pattern (`&&str`, `\|&&c\|`) and one `\|\|` for the bars of a closure without parameters | two `&`, two `\|` | Neither is a boolean operator: the tree tells a reference and a closure from one. |
+| `hal` | `*_operators`, `*_operands` | a real split at its point or sign (`0.5`, `1e-6`: two operands and an operator) | one operand | A real is one literal. |
+| `hal` | `*_operands` | the `b` of a byte literal (`b'('`, `b"x"`) | none, as for any string or character | The prefix belongs to the literal. |
+| `hal` | `*_operators`, `*_operands` | a raw identifier read as `r`, `#` and a keyword (`r#as`) | one operand | The name as written. |
+| `hal` | `*_operators`, `*_operands` | `macro_rules!` as an operand and `!`; a macro's `$self` as nothing | nothing for `macro_rules!`, as for `fn`; `$self` an operand | `macro_rules!` declares a macro; `$self` is a macro variable, not `self`. |
 
 ## Known gaps
 
@@ -46,3 +52,4 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 | `churn`, `age`: a rename near the 50% similarity threshold | followed as libgit2 scores similarity | followed as `git log -M` scores it | km2 reads history through the `git` program; kaikai has no libgit2 binding. On `lnds/kaikai`, 5 of 879 files differ. |
 | `authors`: `last_active` of an author whose commits share one commit time | an older commit's author date (seen in `lnds/kimun` and `phoenixframework/phoenix`, one author each) | the newest commit's author date | libgit2's time sort leaves commits with the same commit time in no set order, so km may meet an older one first. |
 | An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |
+| `hal`: the separator of a macro repetition (the `,` of `$($x),*`) | an operator | nothing | tree-sitter-rust parses the separator as a hidden token, which no query reaches. |

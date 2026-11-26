@@ -3,6 +3,7 @@ import km2.age
 import km2.authors
 import km2.churn
 import km2.cycom_cli
+import km2.hal_cli
 import km2.indent
 import km2.loc_cli
 import km2.tc
@@ -20,6 +21,7 @@ pub fn application() : cli.App[File + Env + Process + Stdout + Stderr + Clock + 
     |> cli.add_command(loc_cli.command())
     |> cli.add_command(indent.command())
     |> cli.add_command(cycom_cli.command())
+    |> cli.add_command(hal_cli.command())
     |> cli.add_command(churn.command())
     |> cli.add_command(age.command())
     |> cli.add_command(authors.command())
