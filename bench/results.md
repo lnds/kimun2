@@ -4,16 +4,20 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `hal` over tree-sitter, Rust, on kaikai 0.201.3 (out of budget on memory)
+## `hal` over tree-sitter, Rust and Kaikai, on kaikai 0.201.3 (out of budget on memory)
 
-`bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km hal --include-ext rs` and the same for km2. Inputs: `lnds/kimun` at `8bb7886` (`src`, 261 files) and `rust-lang/cargo` at `9b87fe4` (`src`, 253 files).
+`bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km hal --include-ext rs` or `--include-ext kai` and the same for km2. Inputs: `lnds/kimun` at `8bb7886` (`src`, 261 files), `rust-lang/cargo` at `9b87fe4` (`src`, 253 files), the kaikai stdlib at `0990eea3e` (94 files) and km2's own `src`.
 
 | Input | km time | km RSS | km2 time | km2 RSS | time | RSS |
 |---|---|---|---|---|---|---|
-| `kimun/src` | 304 ms | 13.3 MB | 409 ms | 20.0 MB | 1.35× | 1.50× |
-| `cargo/src` | 589 ms | 14.7 MB | 736 ms | 26.3 MB | 1.25× | 1.79× |
+| `kimun/src` | 294 ms | 13.2 MB | 342 ms | 20.7 MB | 1.16× | 1.57× |
+| `cargo/src` | 586 ms | 14.7 MB | 534 ms | 28.2 MB | 0.91× | 1.92× |
+| kaikai stdlib | 96 ms | 12.6 MB | 124 ms | 21.0 MB | 1.29× | 1.67× |
+| km2 `src` | 54 ms | 11.5 MB | 77 ms | 14.9 MB | 1.42× | 1.30× |
 
 Time is within budget; memory is not. On the same input `cycom` is within it (`cargo/src`: km 396 ms and 15.2 MB, km2 323 ms and 20.4 MB, 1.34×), so the excess is `hal`'s own: the query captures nearly every token, and each file's captures are a list of records many times longer than `cycom`'s.
+
+The first version sorted each file's captures by position to walk them beside the line kinds; on the kaikai stdlib that sort was 0.9 G of 2.97 G instructions retired and put time at 1.63×. The captures are now kept by looking each one's row up in an array of the code rows, in any order: 2.03 G.
 
 ## `cycom` over tree-sitter, on kaikai 0.201.0 (current, out of budget on memory)
 

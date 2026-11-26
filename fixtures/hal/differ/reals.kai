@@ -1,0 +1,1 @@
+fn half(x: Real) : Real = x * 0.5 + 1.0e3

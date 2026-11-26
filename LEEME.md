@@ -4,7 +4,7 @@ Métricas de código sobre árboles de sintaxis: el sucesor de [km (Kimün)](htt
 
 km2 apunta a reemplazar a `km` sin cambios para quien lo usa: los mismos comandos, flags, formatos de salida, esquema JSON y `.kimun.toml`, con mejores mediciones donde un árbol de sintaxis ve lo que una lectura léxica no alcanza. Hasta llegar a la paridad, `km` sigue siendo la herramienta a usar.
 
-Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con todas las opciones y formatos de sus pares en `km`. `cycom` está portado para Rust, Elixir y Kaikai, los lenguajes que km2 analiza, y `hal` para Rust; `km cycom` y `km hal` miden además una treintena de lenguajes que km2 deja fuera hasta incorporar sus gramáticas. Los demás comandos todavía no están implementados.
+Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con todas las opciones y formatos de sus pares en `km`. `cycom` está portado para Rust, Elixir y Kaikai, los lenguajes que km2 analiza, y `hal` para Rust y Kaikai; `km cycom` y `km hal` miden además una treintena de lenguajes que km2 deja fuera hasta incorporar sus gramáticas. Los demás comandos todavía no están implementados.
 
 ## Compilación
 
@@ -37,10 +37,14 @@ Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Cada 
 | `cycom` | `functions` | una declaración `extern` de kaikai en varias líneas como función, y las funciones de una línea que la siguen, perdidas | las funciones con cuerpo | Un `extern` no tiene cuerpo. |
 | `hal` | `*_operators` | un `>>` donde cierran genéricos anidados (`Box<dyn Error>>`) | dos `>` | Cada `>` cierra un genérico; ninguno desplaza. |
 | `hal` | `*_operators` | un `&&` en un tipo o patrón de referencia (`&&str`, `\|&&c\|`) y un `\|\|` por las barras de una clausura sin parámetros | dos `&`, dos `\|` | Ninguno es un operador booleano: el árbol distingue una referencia y una clausura de uno. |
-| `hal` | `*_operators`, `*_operands` | un real partido en su punto o signo (`0.5`, `1e-6`: dos operandos y un operador) | un operando | Un real es un solo literal. |
+| `hal` | `*_operators`, `*_operands` | un real partido en su punto o signo (Rust `0.5`, `1e-6`, Kaikai `1.0e3`: dos operandos y un operador) | un operando | Un real es un solo literal. |
 | `hal` | `*_operands` | la `b` de un literal de bytes (`b'('`, `b"x"`) | ninguno, como para cualquier string o carácter | El prefijo es parte del literal. |
 | `hal` | `*_operators`, `*_operands` | un identificador crudo leído como `r`, `#` y una palabra clave (`r#as`) | un operando | El nombre como está escrito. |
 | `hal` | `*_operators`, `*_operands` | `macro_rules!` como operando y `!`; el `$self` de una macro como nada | nada por `macro_rules!`, como por `fn`; `$self` un operando | `macro_rules!` declara una macro; `$self` es una variable de macro, no `self`. |
+| `hal` | `*_operators`, `*_operands` | nada por el código interpolado en un string de Kaikai (`"#{n + 1}"`) | sus operadores y operandos | El código interpolado se ejecuta, como en `cycom`. |
+| `hal` | `*_operators` | dos operadores por cada apertura de Kaikai escrita como un solo token: un import selectivo, un mapa, un conjunto, un atributo (`.{`, `%{`, `%[`, `#[`) | uno | El lenguaje escribe cada una como un solo token. |
+| `hal` | `*_operators`, `*_operands` | `initially`, `finally` y `return` de un handler de Kaikai como operandos; un valor llamado `unit` como nada | `initially`, `finally` y `return` operadores, como lo son `handle` y `with`; `unit` un operando | Dirigen el flujo de un handler; un nombre es un operando, se lea como se lea. |
+| `hal` | `*_operands` | las palabras clave de declaración de Kaikai que faltan en la lista de km (`theory`, `kind`, `builtin`, `over`, `opaque`, `default`) como operandos | nada, como para `type` y `effect` | Declaran, no calculan. Las cuatro primeras son propias de la stdlib; el fixture fija `opaque` y `default`. |
 
 ## Brechas conocidas
 

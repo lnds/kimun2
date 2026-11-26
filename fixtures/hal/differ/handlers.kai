@@ -1,0 +1,17 @@
+effect Ask {
+  ask() : Int
+}
+
+fn answered(unit: Int) : Int =
+  handle {
+    Ask.ask() + unit
+  } with Ask {
+    initially {
+      1
+    }
+    finally {
+      ()
+    }
+    ask(resume) -> resume(state)
+    return(x) -> x
+  }

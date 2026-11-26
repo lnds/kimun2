@@ -28,6 +28,10 @@ test "rust: keywords and symbols are operators, names and numbers operands, test
   assert counts("same/basics.rs", "rust") == ((35, 43, 169, 77))
 }
 
+test "kaikai: flow and boolean keywords and symbols are operators, tests left out" {
+  assert counts("same/basics.kai", "kaikai") == ((30, 29, 101, 61))
+}
+
 # Where km2 reads the tree and km the text, and they part.
 
 test "rust: the `>>` that closes nested generics is two `>`" {
@@ -56,6 +60,26 @@ test "rust: a raw identifier is one operand" {
 
 test "rust: `macro_rules!` declares, and a macro's `$self` is an operand" {
   assert counts("differ/macros.rs", "rust") == ((10, 6, 19, 9))
+}
+
+test "kaikai: a real is one operand" {
+  assert counts("differ/reals.kai", "kaikai") == ((6, 4, 7, 5))
+}
+
+test "kaikai: interpolated code counts" {
+  assert counts("differ/interpolation.kai", "kaikai") == ((8, 4, 14, 6))
+}
+
+test "kaikai: `.{` and `%{` are one operator each" {
+  assert counts("differ/openers.kai", "kaikai") == ((11, 4, 12, 5))
+}
+
+test "kaikai: `initially`, `finally` and `return` are operators, a name `unit` an operand" {
+  assert counts("differ/handlers.kai", "kaikai") == ((14, 8, 37, 15))
+}
+
+test "kaikai: `opaque` and `default` declare" {
+  assert counts("differ/declarations.kai", "kaikai") == ((7, 5, 16, 8))
 }
 
 test "a file needs operators and operands" {

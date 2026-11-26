@@ -1,0 +1,1 @@
+fn greet(name: String, n: Int) : String = "hello #{name}, #{n + 1}"

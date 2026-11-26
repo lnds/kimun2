@@ -1,0 +1,3 @@
+import collections.map.{Map}
+
+fn empty() : Map[String, Int] = %{}

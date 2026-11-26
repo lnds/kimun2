@@ -1,0 +1,8 @@
+extern "C" pub opaque Handle
+
+effect Log {
+  log(s: String) : Unit
+  default {
+    log(s, resume) -> resume(())
+  }
+}

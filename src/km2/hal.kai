@@ -2,6 +2,7 @@
 # query: each `@operator` and `@operand` on a code line, told apart by
 # its text.
 
+import array
 import collections.set
 import km2.lines.{LineKind, Code}
 import km2.syntax.{Capture}
@@ -23,23 +24,13 @@ pub type FileHal = {
   time: Real
 }
 
-# The captures on code lines: `kinds` holds a kind per row from `row`
-# on, and the captures come sorted by row.
-fn on_code(caps: [Capture], kinds: [LineKind], row: Int, acc: [Capture]) : [Capture] =
-  match (caps, kinds) {
-    ([], _) -> acc
-    (_, []) -> acc
-    ([c, ...cs], [k, ...ks]) ->
-      if c.row > row {
-        on_code(caps, ks, row + 1, acc)
-      } else if k == Code {
-        on_code(cs, kinds, row, [c, ...acc])
-      } else {
-        on_code(cs, kinds, row, acc)
-      }
-  }
+# Whether each row is a code line, indexed by row.
+fn code_rows(kinds: [LineKind]) : Array[Bool] = array.from(kinds | (k => k == Code))
 
-fn by_start(a: Capture, b: Capture) : Int = a.from - b.from
+fn on_code(caps: [Capture], code: Array[Bool]) : [Capture] {
+  let n = array_length(code)
+  caps |? (c => c.row < n and code[c.row])
+}
 
 fn text_of(src: String, c: Capture) : String = string.slice(src, c.from, c.to - c.from)
 
@@ -90,6 +81,6 @@ pub fn analyze(
 ) : Option[
   FileHal
 ] {
-  let kept = on_code(list.sort_by(caps, by_start), kinds, 0, [])
+  let kept = on_code(caps, code_rows(kinds))
   measures(path, language, texts(kept, src, "operator"), texts(kept, src, "operand"))
 }

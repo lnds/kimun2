@@ -1,0 +1,29 @@
+# Words longer than a minimum, and a pick over an option.
+
+import collections.map
+
+#[doc("The words of `text` longer than `min`.")]
+pub fn long_words(text: String, min: Int) : [String] =
+  string.split(text, " ") |? (w => string.length(w) > min) | string.to_upper
+
+fn pick(o: Option[Int]) : Int = match o {
+  Some(n) if n > 0 and n < 10 -> n * 2
+  Some(_) -> 0
+  None -> -1
+}
+
+fn total(xs: [Int], acc: Int) : Int = match xs {
+  [] -> acc
+  [x, ...rest] -> total(rest, acc + x)
+}
+
+fn label(n: Int) : String {
+  let s = "a string counts nothing"
+  var k := n
+  k := k + 1
+  if not (k == 0 or k != 1) { s } else { s ++ "!" }
+}
+
+test "left out" {
+  assert pick(Some(1)) == 2
+}
