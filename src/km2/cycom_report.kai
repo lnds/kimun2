@@ -9,6 +9,7 @@ import km2.cycom
 import km2.cycom.{CycomLevel, CySimple, CyModerate, CyComplex, CyHighlyComplex, CyExtreme, FileCycom, FunctionCycom}
 
 import km2.ci_report
+import km2.file_table
 import km2.history_report
 
 fn label(l: CycomLevel) : String = match l {
@@ -20,13 +21,6 @@ fn label(l: CycomLevel) : String = match l {
 }
 
 fn json_label(l: CycomLevel) : String = string.replace(label(l), " ", "_")
-
-fn widest(names: [String], least: Int) : Int =
-  names
-    |> list.foldl(least, (w, s) => {
-      let n = text.display_width(s)
-      if n > w { n } else { w }
-    })
 
 fn pad(s: String, width: Int) : String = s ++ string.repeat(" ", width - text.display_width(s))
 
@@ -45,9 +39,6 @@ fn average(files: [FileCycom]) : Real {
   if n > 0 { int_to_real(total(files)) / int_to_real(n) } else { 0.0 }
 }
 
-fn total_label(all: Int, shown: Int) : String =
-  if shown < all { " Total (#{all} files, #{shown} shown)" } else { " Total (#{all} files)" }
-
 fn numbers(functions: Int, avg: Real, max: Int, sum: Int) : String {
   let r = history_report.right
   "#{r("#{functions}", 9)} #{r(fixed(avg), 5)} #{r("#{max}", 5)} #{r("#{sum}", 7)}"
@@ -59,27 +50,23 @@ pub fn table(files: [FileCycom], shown: Int) : String =
     "No recognized source files found."
   } else {
     let rows = list.take(files, shown)
-    let w = widest(rows | .path, 4)
-    let rule = history_report.rule(if w + 55 > 78 { w + 55 } else { 78 })
+    let w = file_table.widest(rows | .path, 4)
     let r = history_report.right
-    [
+    file_table.framed(
       "Cyclomatic Complexity",
-      rule,
+      if w + 55 > 78 { w + 55 } else { 78 },
       " #{pad("File", w)}  #{r("Functions", 9)} #{r("Avg", 5)} #{r("Max", 5)} #{r("Total", 7)}  Level",
-      rule,
-      ...rows
+      rows
         | (f => " #{pad(f.path, w)}  #{numbers(list.length(f.functions), f.avg, f.max, f.total)}  #{label(cycom.level_of(f.max))}"),
-      rule,
-      "#{pad(total_label(list.length(files), shown), w + 1)}  #{numbers(function_count(files), average(files), most(files), total(files))}"
-    ]
-      |> string.join("\n")
+      "#{pad(file_table.total_label(list.length(files), shown), w + 1)}  #{numbers(function_count(files), average(files), most(files), total(files))}"
+    )
   }
 
 fn at_least(f: FileCycom, min: Int) : [FunctionCycom] = f.functions |? (g => g.complexity >= min)
 
 fn breakdown(f: FileCycom, min: Int) : [String] {
   let rows = at_least(f, min)
-  let w = widest(rows | .name, 10)
+  let w = file_table.widest(rows | .name, 10)
   [
     "",
     "#{f.path}:",

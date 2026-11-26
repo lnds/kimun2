@@ -61,12 +61,8 @@ pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + 
   cli.command("hal", "Analyze Halstead complexity metrics per file", run_hal)
     |> walk_cli.with_common
     |> walk_cli.with_top
-    |> cli.with_option(
-      cli.text_option_with_default(
-        "sort-by",
-        "Sort by metric: effort, volume, or bugs (default: effort)",
-        "effort"
-      )
-        |> cli.value_name("SORT_BY")
-        |> cli.choices(["effort", "volume", "bugs"])
+    |> walk_cli.with_sort_by(
+      "Sort by metric: effort, volume, or bugs (default: effort)",
+      "effort",
+      ["effort", "volume", "bugs"]
     )

@@ -234,6 +234,20 @@ pub fn with_common[e](cmd: cli.Command[e]) : cli.Command[e] =
       )
     )
 
+#[doc("Adds km's `--sort-by` with its help, its default and the values it takes.")]
+pub fn with_sort_by[e](
+  cmd: cli.Command[e],
+  help: String,
+  default: String,
+  values: [String]
+) : cli.Command[e] =
+  cmd
+    |> cli.with_option(
+      cli.text_option_with_default("sort-by", help, default)
+        |> cli.value_name("SORT_BY")
+        |> cli.choices(values)
+    )
+
 #[doc("Adds km's `--top` for a report of files: rows of the table, every file in JSON unless given.")]
 pub fn with_top[e](cmd: cli.Command[e]) : cli.Command[e] =
   cmd

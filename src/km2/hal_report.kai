@@ -5,7 +5,7 @@ import encoding.json
 import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
 import text
 import km2.hal.{FileHal}
-import km2.history_report
+import km2.file_table
 
 fn pad(s: String, width: Int) : String = s ++ string.repeat(" ", width - text.display_width(s))
 
@@ -33,16 +33,6 @@ fn sum(files: [FileHal], f: (FileHal) -> Real) : Real =
 fn total_n(files: [FileHal], f: (FileHal) -> Int) : Int =
   files |> list.foldl(0, (s, x) => s + f(x))
 
-fn total_label(all: Int, shown: Int) : String =
-  if shown < all { " Total (#{all} files, #{shown} shown)" } else { " Total (#{all} files)" }
-
-fn widest(paths: [String]) : Int =
-  paths
-    |> list.foldl(4, (w, s) => {
-      let n = text.display_width(s)
-      if n > w { n } else { w }
-    })
-
 fn columns(
   n1: String,
   n2: String,
@@ -65,7 +55,7 @@ fn row(f: FileHal, w: Int) : String =
     )
 
 fn totals(files: [FileHal], shown: Int, w: Int) : String =
-  pad(total_label(list.length(files), shown), w + 1)
+  pad(file_table.total_label(list.length(files), shown), w + 1)
     ++ "  "
     ++ columns(
       "",
@@ -86,19 +76,15 @@ pub fn table(files: [FileHal], shown: Int) : String =
     "No recognized source files found."
   } else {
     let rows = list.take(files, shown)
-    let w = widest(rows | .path)
-    let rule = history_report.rule(if w + 72 > 88 { w + 72 } else { 88 })
-    [
+    let w = file_table.widest(rows | .path, 4)
+    file_table.framed(
       "Halstead Complexity Metrics",
-      rule,
+      if w + 72 > 88 { w + 72 } else { 88 },
       " #{pad("File", w)}  "
         ++ columns("η₁", "η₂", "N₁", "N₂", ("Volume", "Effort", "Bugs", "Time")),
-      rule,
-      ...rows | (f => row(f, w)),
-      rule,
+      rows | (f => row(f, w)),
       totals(files, shown, w)
-    ]
-      |> string.join("\n")
+    )
   }
 
 fn entry(f: FileHal) : JsonValue =

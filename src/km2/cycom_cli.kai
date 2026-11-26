@@ -82,12 +82,6 @@ pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + 
     )
     |> walk_cli.with_top
     |> cli.with_option(cli.boolean_option("per-function", "Show per-function breakdown"))
-    |> cli.with_option(
-      cli.text_option_with_default(
-        "sort-by",
-        "Sort by metric: total, max, or avg (default: total)",
-        "total"
-      )
-        |> cli.value_name("SORT_BY")
-        |> cli.choices(["total", "max", "avg"])
-    )
+    |> walk_cli.with_sort_by("Sort by metric: total, max, or avg (default: total)", "total", [
+      "total", "max", "avg"
+    ])

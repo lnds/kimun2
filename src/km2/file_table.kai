@@ -1,0 +1,23 @@
+# What the tables of files share with km's: the width of the path
+# column, the label of the totals row, and the frame of rules.
+
+import text
+import km2.history_report
+
+#[doc("The display width of the widest of `names`, and `least` at least.")]
+pub fn widest(names: [String], least: Int) : Int =
+  names
+    |> list.foldl(least, (w, s) => {
+      let n = text.display_width(s)
+      if n > w { n } else { w }
+    })
+
+#[doc("The label of the totals row: how many files there are, and how many are shown when not all.")]
+pub fn total_label(all: Int, shown: Int) : String =
+  if shown < all { " Total (#{all} files, #{shown} shown)" } else { " Total (#{all} files)" }
+
+#[doc("A table under `title`: the header, the rows and the totals, parted by rules `width` wide.")]
+pub fn framed(title: String, width: Int, header: String, rows: [String], totals: String) : String {
+  let rule = history_report.rule(width)
+  [title, rule, header, rule, ...rows, rule, totals] |> string.join("\n")
+}

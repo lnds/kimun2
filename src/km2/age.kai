@@ -230,15 +230,9 @@ pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + 
       )
         |> cli.value_name("FROZEN_DAYS")
     )
-    |> cli.with_option(
-      cli.text_option_with_default(
-        "sort-by",
-        "Sort by: date (oldest first, default), status, or file",
-        "date"
-      )
-        |> cli.value_name("SORT_BY")
-        |> cli.choices(["date", "status", "file"])
-    )
+    |> walk_cli.with_sort_by("Sort by: date (oldest first, default), status, or file", "date", [
+      "date", "status", "file"
+    ])
     |> cli.with_option(
       cli.text_option("status", "Show only files with this status: active, stale, or frozen")
         |> cli.value_name("STATUS")

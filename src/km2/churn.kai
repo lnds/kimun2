@@ -228,14 +228,10 @@ pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + 
   )
     |> walk_cli.with_common
     |> walk_cli.with_top
-    |> cli.with_option(
-      cli.text_option_with_default(
-        "sort-by",
-        "Sort by: commits (default), rate (commits/month), or file",
-        "commits"
-      )
-        |> cli.value_name("SORT_BY")
-        |> cli.choices(["commits", "rate", "file"])
+    |> walk_cli.with_sort_by(
+      "Sort by: commits (default), rate (commits/month), or file",
+      "commits",
+      ["commits", "rate", "file"]
     )
     |> cli.with_option(
       cli.text_option("since", "Only consider commits since this time (e.g. 6m, 1y, 30d)")
