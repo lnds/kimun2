@@ -8,7 +8,7 @@ Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con t
 
 ## Compilación
 
-Requiere kaikai 0.201.1 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`, `churn`, `age` y `authors`.
+Requiere kaikai 0.201.3 (`.kaikai-version`), `km` y `jq` para el control de calidad, y `git` para `loc --by-author`, `churn`, `age` y `authors`.
 
 ```sh
 make build   # ./km2
