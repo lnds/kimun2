@@ -4,7 +4,7 @@ Code metrics over syntax trees: the successor of [km (Kimün)](https://github.co
 
 km2 aims to be a drop-in replacement for `km`: the same commands, flags, output formats, JSON schema and `.kimun.toml`, with better measurements wherever a syntax tree sees what a lexical reader cannot. Until it reaches parity, `km` remains the tool to use.
 
-Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom` is ported for Rust, Elixir and Kaikai, which km2 parses, and `hal` for Rust and Kaikai; `km cycom` and `km hal` also measure some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
+Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom` and `hal` are ported for Rust, Elixir and Kaikai, which km2 parses; `km cycom` and `km hal` also measure some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
 
 ## Building
 
@@ -37,14 +37,18 @@ Every value km2 reports differently from `km` because it measures better, and wh
 | `cycom` | `functions` | a kaikai `extern` declaration over several lines as a function, and the one-line functions after it missed | the functions with a body | An `extern` has no body. |
 | `hal` | `*_operators` | one `>>` where nested generics close (`Box<dyn Error>>`) | two `>` | Each `>` closes a generic; neither shifts. |
 | `hal` | `*_operators` | one `&&` in a reference type or pattern (`&&str`, `\|&&c\|`) and one `\|\|` for the bars of a closure without parameters | two `&`, two `\|` | Neither is a boolean operator: the tree tells a reference and a closure from one. |
-| `hal` | `*_operators`, `*_operands` | a real split at its point or sign (Rust `0.5`, `1e-6`, Kaikai `1.0e3`: two operands and an operator) | one operand | A real is one literal. |
+| `hal` | `*_operators`, `*_operands` | a real split at its point or sign (Rust `0.5`, `1e-6`, Kaikai and Elixir `1.0e3`: two operands and an operator) | one operand | A real is one literal. |
 | `hal` | `*_operands` | the `b` of a byte literal (`b'('`, `b"x"`) | none, as for any string or character | The prefix belongs to the literal. |
 | `hal` | `*_operators`, `*_operands` | a raw identifier read as `r`, `#` and a keyword (`r#as`) | one operand | The name as written. |
 | `hal` | `*_operators`, `*_operands` | `macro_rules!` as an operand and `!`; a macro's `$self` as nothing | nothing for `macro_rules!`, as for `fn`; `$self` an operand | `macro_rules!` declares a macro; `$self` is a macro variable, not `self`. |
-| `hal` | `*_operators`, `*_operands` | nothing for code interpolated in a Kaikai string (`"#{n + 1}"`) | its operators and operands | Interpolated code runs, as for `cycom`. |
+| `hal` | `*_operators`, `*_operands` | nothing for code interpolated in a Kaikai or Elixir string (`"#{n + 1}"`) | its operators and operands | Interpolated code runs, as for `cycom`. |
 | `hal` | `*_operators` | two operators for each Kaikai opener written as one token: a selective import, a map, a set, an attribute (`.{`, `%{`, `%[`, `#[`) | one | The language writes each as one token. |
 | `hal` | `*_operators`, `*_operands` | a Kaikai handler's `initially`, `finally` and `return` as operands; a value named `unit` as nothing | `initially`, `finally` and `return` operators, as `handle` and `with` are; `unit` an operand | They direct the flow of a handler; a name is an operand whatever it reads as. |
 | `hal` | `*_operands` | the Kaikai declaration keywords km's list lacks (`theory`, `kind`, `builtin`, `over`, `opaque`, `default`) as operands | nothing, as for `type` and `effect` | They declare, they do not compute. The first four are the stdlib's own; the fixture pins `opaque` and `default`. |
+| `hal` | `*_operators`, `*_operands` | an Elixir atom, keyword key or dotted alias split at its `:` or `.` (`:ok`, `size:`, `Shop.Cart`), and `do:`/`else:` counted as the `do`/`else` operators | one operand each | Each is one literal: an atom, which a keyword key and an alias also are. |
+| `hal` | `*_operators`, `*_operands` | an Elixir name ending in `!` read as the name and the `!` operator (`fetch!`); one ending in `?` without it | one operand, the name as written | The name as written, as for `cycom`. |
+| `hal` | `*_operators`, `*_operands` | an Elixir sigil's delimiters and letter (`~r/a+b/i`, `~w(x y)`) | nothing, as for a string; what it interpolates counts | A sigil is a literal. |
+| `hal` | `*_operators`, `*_operands` | Elixir's `not in` as two operators; a `not` called as a function (`Kernel.not(x)`) as the operator; `...` as an operator | `not in` one operator; that `not` and `...` operands | `not in` is one operator; the other two are names. |
 
 ## Known gaps
 
@@ -57,3 +61,4 @@ Where km2 does not yet behave as `km`, because kaikai or ahu lacks something it 
 | `authors`: `last_active` of an author whose commits share one commit time | an older commit's author date (seen in `lnds/kimun` and `phoenixframework/phoenix`, one author each) | the newest commit's author date | libgit2's time sort leaves commits with the same commit time in no set order, so km may meet an older one first. |
 | An unknown element in a comma-separated `--kind` (`code,nope`) | `error: ...`, exit 2 | `Error: ...`, exit 1 | kaikailang-org/ahu#45 |
 | `hal`: the separator of a macro repetition (the `,` of `$($x),*`) | an operator | nothing | tree-sitter-rust parses the separator as a hidden token, which no query reaches. |
+| `hal`: an Elixir clause whose pattern is a name starting with `in` (`invalid ->`) after a clause ending in a map update | the name | the operator `in` and the rest of the name | tree-sitter-elixir reads the name's first letters as the `in` operator; reproduced in 8 lines. |

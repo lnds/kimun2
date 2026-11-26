@@ -32,6 +32,10 @@ test "kaikai: flow and boolean keywords and symbols are operators, tests left ou
   assert counts("same/basics.kai", "kaikai") == ((30, 29, 101, 61))
 }
 
+test "elixir: flow words, block delimiters and symbols are operators" {
+  assert counts("same/basics.ex", "elixir") == ((22, 23, 57, 43))
+}
+
 # Where km2 reads the tree and km the text, and they part.
 
 test "rust: the `>>` that closes nested generics is two `>`" {
@@ -80,6 +84,42 @@ test "kaikai: `initially`, `finally` and `return` are operators, a name `unit` a
 
 test "kaikai: `opaque` and `default` declare" {
   assert counts("differ/declarations.kai", "kaikai") == ((7, 5, 16, 8))
+}
+
+test "elixir: an atom is one operand, the key of `do:` and `else:` too" {
+  assert counts("differ/atoms.ex", "elixir") == ((9, 9, 13, 10))
+}
+
+test "elixir: a keyword key is one operand" {
+  assert counts("differ/keywords.ex", "elixir") == ((7, 6, 9, 7))
+}
+
+test "elixir: a dotted alias is one operand" {
+  assert counts("differ/aliases.ex", "elixir") == ((5, 5, 9, 6))
+}
+
+test "elixir: a name ending in `!` or `?` is one operand" {
+  assert counts("differ/names.ex", "elixir") == ((8, 8, 20, 15))
+}
+
+test "elixir: a real is one operand" {
+  assert counts("differ/reals.ex", "elixir") == ((6, 5, 8, 6))
+}
+
+test "elixir: a sigil counts nothing, as a string does" {
+  assert counts("differ/sigils.ex", "elixir") == ((7, 3, 9, 5))
+}
+
+test "elixir: interpolated code counts" {
+  assert counts("differ/interpolation.ex", "elixir") == ((8, 5, 12, 7))
+}
+
+test "elixir: `not in` is one operator, a remote `not` a name" {
+  assert counts("differ/operators.ex", "elixir") == ((9, 7, 13, 10))
+}
+
+test "elixir: `...` is a name" {
+  assert counts("differ/ellipsis.ex", "elixir") == ((9, 7, 13, 9))
 }
 
 test "a file needs operators and operands" {

@@ -1,6 +1,6 @@
 # `hal`: Halstead's measures of a file, from the captures of its `hal`
 # query: each `@operator` and `@operand` on a code line, told apart by
-# its text.
+# its text, but those a `@skip` capture cancels.
 
 import array
 import collections.set
@@ -30,6 +30,17 @@ fn code_rows(kinds: [LineKind]) : Array[Bool] = array.from(kinds | (k => k == Co
 fn on_code(caps: [Capture], code: Array[Bool]) : [Capture] {
   let n = array_length(code)
   caps |? (c => c.row < n and code[c.row])
+}
+
+# The operators and operands left once each `@skip` capture cancels the
+# one taken at its node.
+fn unskipped(caps: [Capture]) : [Capture] {
+  let skipped = set.from(caps |? (c => c.name == "skip") | (c => (c.from, c.to)))
+  if set.size(skipped) == 0 {
+    caps
+  } else {
+    caps |? (c => not set.contains(skipped, (c.from, c.to)))
+  }
 }
 
 fn text_of(src: String, c: Capture) : String = string.slice(src, c.from, c.to - c.from)
@@ -81,6 +92,6 @@ pub fn analyze(
 ) : Option[
   FileHal
 ] {
-  let kept = on_code(caps, code_rows(kinds))
+  let kept = on_code(unskipped(caps), code_rows(kinds))
   measures(path, language, texts(kept, src, "operator"), texts(kept, src, "operand"))
 }

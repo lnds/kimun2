@@ -4,14 +4,16 @@ Measured with `bench/compare.sh`: median wall time of 10 runs after 2 warm-ups, 
 
 Machine: Apple M3 Max, 16 cores. km 0.49.0. km2 0.1.0, single-threaded. Inputs: `kimun/src` at `ebba255` (Rust, 416 files, 2.7 MB), the kaikai 0.196.3 stdlib (96 files), and kaikai 0.196.3 `stdlib`, `examples`, `tests` and `stage2` (6,255 files, 5,847 distinct, intentional syntax errors included).
 
-## `hal` over tree-sitter, Rust and Kaikai, on kaikai 0.201.3 (out of budget on memory)
+## `hal` over tree-sitter, Rust, Elixir and Kaikai, on kaikai 0.201.3 (out of budget on memory)
 
-`bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km hal --include-ext rs` or `--include-ext kai` and the same for km2. Inputs: `lnds/kimun` at `8bb7886` (`src`, 261 files), `rust-lang/cargo` at `9b87fe4` (`src`, 253 files), the kaikai stdlib at `0990eea3e` (94 files) and km2's own `src`.
+`bench/compare.sh` (median of 10 warm runs, peak RSS from `/usr/bin/time -l`), `km hal --include-ext rs`, `ex` or `kai` and the same for km2. Inputs: `lnds/kimun` at `8bb7886` (`src`, 261 files), `rust-lang/cargo` at `9b87fe4` (`src`, 253 files), `phoenixframework/phoenix` at `37d3421` (`lib`, 73 files), `plausible/analytics` at `e83d0ba` (`lib`, 536 files), the kaikai stdlib at `0990eea3e` (94 files) and km2's own `src`.
 
 | Input | km time | km RSS | km2 time | km2 RSS | time | RSS |
 |---|---|---|---|---|---|---|
 | `kimun/src` | 294 ms | 13.2 MB | 342 ms | 20.7 MB | 1.16× | 1.57× |
 | `cargo/src` | 586 ms | 14.7 MB | 534 ms | 28.2 MB | 0.91× | 1.92× |
+| `phoenix/lib` | 109 ms | 12.3 MB | 125 ms | 24.3 MB | 1.14× | 1.98× |
+| `plausible/lib` | 429 ms | 12.9 MB | 392 ms | 24.0 MB | 0.91× | 1.86× |
 | kaikai stdlib | 96 ms | 12.6 MB | 124 ms | 21.0 MB | 1.29× | 1.67× |
 | km2 `src` | 54 ms | 11.5 MB | 77 ms | 14.9 MB | 1.42× | 1.30× |
 
