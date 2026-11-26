@@ -1,3 +1,7 @@
 import collections.map.{Map}
+import collections.set.{Set}
 
 fn empty() : Map[String, Int] = %{}
+
+#[inline]
+fn pair() : Set[Int] = %[ 1, 2 ]

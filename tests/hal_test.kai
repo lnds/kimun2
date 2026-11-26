@@ -33,7 +33,7 @@ test "kaikai: flow and boolean keywords and symbols are operators, tests left ou
 }
 
 test "elixir: flow words, block delimiters and symbols are operators" {
-  assert counts("same/basics.ex", "elixir") == ((22, 23, 57, 43))
+  assert counts("same/basics.ex", "elixir") == ((24, 27, 65, 50))
 }
 
 # Where km2 reads the tree and km the text, and they part.
@@ -74,8 +74,8 @@ test "kaikai: interpolated code counts" {
   assert counts("differ/interpolation.kai", "kaikai") == ((8, 4, 14, 6))
 }
 
-test "kaikai: `.{` and `%{` are one operator each" {
-  assert counts("differ/openers.kai", "kaikai") == ((11, 4, 12, 5))
+test "kaikai: `.{`, `%{` and `%[` are one operator each, and an attribute is code" {
+  assert counts("differ/openers.kai", "kaikai") == ((13, 10, 26, 13))
 }
 
 test "kaikai: `initially`, `finally` and `return` are operators, a name `unit` an operand" {

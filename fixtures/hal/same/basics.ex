@@ -21,6 +21,10 @@ defmodule Shop do
     end
   end
 
+  def blank(c) do
+    c == ?a or c == nil or false
+  end
+
   def each(list) do
     for x <- list, x != nil do
       pick(x) |> to_string()
