@@ -14,11 +14,20 @@ out="$root/src/km2/queries.kai"
     lang=$(basename "$(dirname "$f")")
     name=$(basename "$f" .scm)
     printf '  ("%s", "%s") ->\n    """\n' "$lang" "$name"
-    sed 's/^/    /' "$f"
+    # A kaikai string reads `\` as an escape and `#{` as interpolation.
+    sed -e 's/\\/\\\\/g' -e 's/#{/#\\u{7B}/g' -e 's/^/    /' "$f"
     printf '    """\n'
   done
   echo '  _ -> ""'
   echo "}"
+  echo
+  echo "#[doc(\"Every (grammar, query name) pair with a source.\")]"
+  echo "pub const ALL : [(String, String)] = ["
+  for f in "$root"/queries/*/*.scm; do
+    [ -e "$f" ] || continue
+    printf '  ("%s", "%s"),\n' "$(basename "$(dirname "$f")")" "$(basename "$f" .scm)"
+  done
+  echo "]"
 } > "$out"
 
 kai fmt "$out" >/dev/null

@@ -1,0 +1,16 @@
+import km2.queries
+import km2.ts
+
+fn compiles(pair: (String, String)) : Bool / Ffi {
+  let (grammar, name) = pair
+  let q = ts.query(grammar, queries.source(grammar, name))
+  let at = ts.query_error(q)
+  ts.query_free(q)
+  at == (-1)
+}
+
+test "every embedded query compiles for its grammar" {
+  let failing = queries.ALL |? (p => not compiles(p))
+  assert queries.ALL != []
+  assert failing == []
+}

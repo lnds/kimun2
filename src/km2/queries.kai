@@ -83,3 +83,10 @@ pub fn source(grammar: String, name: String) : String = match (grammar, name) {
     """
   _ -> ""
 }
+
+#[doc("Every (grammar, query name) pair with a source.")]
+pub const ALL : [(String, String)] = [
+  ("elixir", "cycom"),
+  ("kaikai", "cycom"),
+  ("rust", "cycom")
+]
