@@ -29,6 +29,9 @@
 ; `#[serde(default)]`), a macro's `$name` and its fragment specifiers.
 ["default" "union" "raw" "gen" "try" "yield"] @operand
 
+; The separator of a macro repetition, as the `,` of `$($x),*`.
+(repetition_separator) @operator
+
 ((metavariable) @operand (#not-eq? @operand "$crate"))
 
 (fragment_specifier) @operand

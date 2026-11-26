@@ -33,7 +33,7 @@ test "kaikai: flow and boolean keywords and symbols are operators, tests left ou
 }
 
 test "elixir: flow words, block delimiters and symbols are operators" {
-  assert counts("same/basics.ex", "elixir") == ((24, 27, 65, 50))
+  assert counts("same/basics.ex", "elixir") == ((29, 29, 81, 60))
 }
 
 # Where km2 reads the tree and km the text, and they part.
@@ -62,8 +62,8 @@ test "rust: a raw identifier is one operand" {
   assert counts("differ/raw_names.rs", "rust") == ((8, 3, 10, 4))
 }
 
-test "rust: `macro_rules!` declares, and a macro's `$self` is an operand" {
-  assert counts("differ/macros.rs", "rust") == ((10, 6, 19, 9))
+test "rust: `macro_rules!` declares, a macro's `$self` is an operand and its separator an operator" {
+  assert counts("differ/macros.rs", "rust") == ((12, 10, 41, 17))
 }
 
 test "kaikai: a real is one operand" {

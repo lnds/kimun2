@@ -25,6 +25,17 @@ defmodule Shop do
     c == ?a or c == nil or false
   end
 
+  def kind(x) do
+    case x do
+      0 ->
+        pick(x)
+        %{x | "id" => 1}
+
+      invalid ->
+        invalid
+    end
+  end
+
   def each(list) do
     for x <- list, x != nil do
       pick(x) |> to_string()
