@@ -23,6 +23,10 @@ paths:
   `TREE_SITTER_LANGUAGE_VERSION` in `lib/include/tree_sitter/api.h`). Use
   the `parser.c` a grammar releases; generate one only for a grammar that
   publishes none.
+- A fix a grammar has not released lives on a fork under `lnds`, pinned
+  by commit and based on the pinned release, with a pull request
+  upstream; its `parser.c` is generated with the CLI version the grammar
+  pins. The pin returns to the upstream release once the fix ships.
 - kaikai's grammar is `kaikailang-org/tree-sitter-kaikai`. A kaikai form
   it does not parse is fixed there, with a corpus test, and the new pin
   vendored here; never patched in `vendor/`.
