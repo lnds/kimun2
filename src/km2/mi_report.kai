@@ -1,0 +1,76 @@
+# The outputs of `km mi`: table, JSON and the one-line summaries.
+
+import math.real
+import encoding.json
+import encoding.json_bind.{JsonValue, JArr, JObj, JStr, JNum, JReal}
+import km2.file_table
+import km2.history_report
+import km2.mi
+import km2.mi.{FileMi, MiLevel, MiGreen, MiYellow, MiRed}
+
+fn label(l: MiLevel) : String = match l {
+  MiGreen -> "green"
+  MiYellow -> "yellow"
+  MiRed -> "red"
+}
+
+fn level(f: FileMi) : MiLevel = mi.level_of(f.score)
+
+fn fixed(x: Real) : String = real.to_fixed(x, 1)
+
+# Padded on the right to `width` characters, as Rust's `{:<width}` pads:
+# by characters, though the column is sized by display width.
+fn left(s: String, width: Int) : String =
+  s ++ string.repeat(" ", width - list.length(chars(s)))
+
+fn columns(volume: String, complexity: String, loc: String, score: String) : String {
+  let r = history_report.right
+  "#{r(volume, 9)} #{r(complexity, 5)} #{r(loc, 5)} #{r(score, 6)}"
+}
+
+fn row(f: FileMi, w: Int) : String =
+  " #{left(f.path, w)}  #{columns(fixed(f.volume), "#{f.complexity}", "#{f.loc}", fixed(f.score))}  #{label(level(f))}"
+
+fn totals(files: [FileMi], shown: Int, w: Int) : String {
+  let loc = files |> list.foldl(0, (n, f) => n + f.loc)
+  "#{left(file_table.total_label(list.length(files), shown), w + 1)}  #{columns("", "", "#{loc}", fixed(mi.weighted(files)))}"
+}
+
+fn listed(files: [FileMi], shown: Int) : String {
+  let rows = list.take(files, shown)
+  let w = file_table.widest(rows | .path, 4)
+  file_table.framed(
+    "Maintainability Index (Visual Studio)",
+    if w + 38 > 70 { w + 38 } else { 70 },
+    " #{left("File", w)}  #{columns("Volume", "Cyclo", "LOC", "MI")}  Level",
+    rows | (f => row(f, w)),
+    totals(files, shown, w)
+  )
+}
+
+#[doc("The table of `km mi`: the first `shown` files, the code lines and the weighted index of all.")]
+pub fn table(files: [FileMi], shown: Int) : String =
+  if files == [] { "No recognized source files found." } else { listed(files, shown) }
+
+fn entry(f: FileMi) : JsonValue =
+  JObj([
+    ("path", JStr(f.path)),
+    ("language", JStr(f.language)),
+    ("halstead_volume", JReal(f.volume)),
+    ("cyclomatic_complexity", JNum(f.complexity)),
+    ("loc", JNum(f.loc)),
+    ("mi_score", JReal(f.score)),
+    ("level", JStr(label(level(f))))
+  ])
+
+#[doc("The JSON of `km mi`: one entry per file.")]
+pub fn to_json(files: [FileMi]) : String = json.json_encode_pretty(JArr(files | entry), 2)
+
+fn in_level(files: [FileMi], l: MiLevel) : Int = list.count(files, f => level(f) == l)
+
+#[doc("The one-line summary of `--format short`.")]
+pub fn short(files: [FileMi]) : String =
+  "mi files:#{list.length(files)} avg:#{terse(files)} green:#{in_level(files, MiGreen)} yellow:#{in_level(files, MiYellow)} red:#{in_level(files, MiRed)}"
+
+#[doc("The weighted index of `--format terse`.")]
+pub fn terse(files: [FileMi]) : String = fixed(mi.weighted(files))

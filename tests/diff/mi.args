@@ -1,0 +1,18 @@
+mi fixtures/mi/same
+mi --format json fixtures/mi/same
+mi --format short fixtures/mi/same
+mi --format terse fixtures/mi/same
+mi --sort-by volume fixtures/mi/same
+mi --sort-by complexity --format json fixtures/mi/same
+mi --sort-by loc fixtures/mi/same
+mi --include-tests fixtures/mi/same
+mi --include-tests --format json fixtures/mi/same
+mi --top 2 fixtures/mi/same
+mi --top 2 --format json fixtures/mi/same
+mi --include-ext ex --format short fixtures/mi/same
+mi fixtures/empty
+mi --format short fixtures/empty
+mi --format terse fixtures/empty
+mi --format json fixtures/empty
+mi fixtures/lang/css
+mi --format json fixtures/lang/css

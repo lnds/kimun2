@@ -1,0 +1,153 @@
+import fs.file
+import km2.indent
+import km2.languages
+import km2.mi
+import km2.mi.{FileMi, MiGreen, MiYellow, MiRed}
+import km2.mi_cli
+import km2.mi_report
+import km2.rust_tests
+import km2.syntax
+import km2.syntax.{Trees}
+
+const DIR : String = "fixtures/mi"
+
+fn captured(grammar: String, src: String) : [[syntax.Capture]] / Ffi =
+  syntax.with_trees(
+    mi.QUERIES | (q => (grammar, q)),
+    () => Trees.captures_each(grammar, mi.QUERIES, src)
+  )
+
+fn measured(name: String, grammar: String, exclude_tests: Bool) : Option[FileMi] / File + Ffi =
+  match (file.read("#{DIR}/#{name}"), languages.by_name(name)) {
+    (Ok(src), Some(spec)) -> {
+      let (_, kinds) = indent.classified(spec, src, exclude_tests)
+      let tests =
+        if exclude_tests and spec.name == "Rust" { rust_tests.test_blocks(src) } else { [] }
+      match captured(grammar, src) {
+        [tokens, branches] ->
+          mi.analyze(name, spec.name, mi.Read {
+            src: src,
+            kinds: kinds,
+            tests: tests,
+            tokens: tokens,
+            branches: branches
+          })
+        _ -> None
+      }
+    }
+    _ -> None
+  }
+
+# Complexity, code lines and the score to one decimal.
+fn inputs(name: String, grammar: String, exclude_tests: Bool) : (Int, Int, String) / File + Ffi =
+  match measured(name, grammar, exclude_tests) {
+    Some(f) -> (f.complexity, f.loc, mi_report.terse([f]))
+    None -> (0, 0, "")
+  }
+
+fn file_of(path: String, volume: Real, complexity: Int, loc: Int) : FileMi =
+  FileMi {
+    path: path,
+    language: "Rust",
+    volume: volume,
+    complexity: complexity,
+    loc: loc,
+    score: mi.score(volume, complexity, loc) ?? (-1.0)
+  }
+
+test "one parse answers each query, in the order asked" {
+  let src = "fn f(a: bool) -> i32 {\n    if a { 1 } else { 2 }\n}\n"
+  let names = captured("rust", src) | (caps => (caps | .name |> list.uniq |> list.sort))
+  assert names == [["operand", "operator"], ["branch", "function", "item", "name"]]
+}
+
+test "a query the grammar lacks leaves every query without captures" {
+  let found = syntax.with_trees(
+    [("rust", "hal")],
+    () => Trees.captures_each("rust", ["hal", "nope"], "fn f() {}")
+  )
+  assert found == [[], []]
+}
+
+test "rust, elixir and kaikai: complexity, code lines and score as km reports them" {
+  assert inputs("same/cart.rs", "rust", true) == ((7, 18, "53.9"))
+  assert inputs("same/shop.ex", "elixir", true) == ((6, 17, "54.4"))
+  assert inputs("same/words.kai", "kaikai", true) == ((6, 9, "60.3"))
+}
+
+test "rust: inline tests count when tests are included" {
+  assert inputs("same/cart.rs", "rust", false) == ((9, 28, "47.7"))
+}
+
+test "a file of comments has no index" {
+  assert measured("same/notes.rs", "rust", true) == None
+}
+
+test "a score below zero is zero, and red" {
+  assert inputs("same/dense.rs", "rust", true) == ((200, 360, "0.0"))
+  assert inputs("same/busy.rs", "rust", true) == ((90, 162, "14.5"))
+}
+
+test "volume and complexity are those of hal and cycom, where they differ from km's" {
+  match measured("differ/inherited.rs", "rust", true) {
+    Some(f) -> {
+      assert ((f.complexity, f.loc)) == ((2, 6))
+      assert f.volume == 32.0 * real_log2(18.0)
+      assert mi_report.terse([f]) == "67.9"
+    }
+    None -> {
+      assert false
+    }
+  }
+}
+
+test "the score follows Visual Studio's formula" {
+  let raw = 171.0 - 5.2 * real_log(100.0) - 0.23 * 4.0 - 16.2 * real_log(10.0)
+  assert mi.score(100.0, 4, 10) == Some(raw * 100.0 / 171.0)
+}
+
+test "no score without volume, complexity or code lines" {
+  assert mi.score(0.0, 1, 1) == None
+  assert mi.score(1.0, 0, 1) == None
+  assert mi.score(1.0, 1, 0) == None
+}
+
+test "green from 20, yellow from 10, red below" {
+  assert mi.level_of(20.0) == MiGreen
+  assert mi.level_of(19.99) == MiYellow
+  assert mi.level_of(10.0) == MiYellow
+  assert mi.level_of(9.99) == MiRed
+}
+
+test "the index of a set weighs each file by its code lines" {
+  let small = file_of("a.rs", 100.0, 1, 10)
+  let large = file_of("b.rs", 100.0, 1, 30)
+  assert mi.weighted([small, large]) == (small.score * 10.0 + large.score * 30.0) / 40.0
+  assert mi.weighted([]) == 0.0
+}
+
+test "sorted by mi lowest first, by the others highest first, ties in walk order" {
+  let a = file_of("a.rs", 100.0, 3, 10)
+  let b = file_of("b.rs", 300.0, 1, 10)
+  let c = file_of("c.rs", 100.0, 3, 20)
+  let paths = (by: String) => (mi_cli.sorted([a, b, c], by) | .path)
+  assert paths("mi") == ["c.rs", "b.rs", "a.rs"]
+  assert paths("volume") == ["b.rs", "a.rs", "c.rs"]
+  assert paths("complexity") == ["a.rs", "c.rs", "b.rs"]
+  assert paths("loc") == ["c.rs", "a.rs", "b.rs"]
+}
+
+test "no files: km's summaries of nothing" {
+  assert mi_report.short([]) == "mi files:0 avg:0.0 green:0 yellow:0 red:0"
+  assert mi_report.terse([]) == "0.0"
+  assert mi_report.table([], 20) == "No recognized source files found."
+}
+
+test "the table pads a path by characters and sizes the column by display width, as km does" {
+  let rows = string.lines(
+    mi_report.table([file_of("日本語.rs", 100.0, 1, 10), file_of("a.rs", 100.0, 1, 10)], 20)
+  )
+  assert list.nth(rows, 2) == Some(" File          Volume Cyclo   LOC     MI  Level")
+  assert list.nth(rows, 4) == Some(" 日本語.rs         100.0     1    10   64.0  green")
+  assert list.nth(rows, 5) == Some(" a.rs           100.0     1    10   64.0  green")
+}

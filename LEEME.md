@@ -4,7 +4,7 @@ Métricas de código sobre árboles de sintaxis: el sucesor de [km (Kimün)](htt
 
 km2 apunta a reemplazar a `km` sin cambios para quien lo usa: los mismos comandos, flags, formatos de salida, esquema JSON y `.kimun.toml`, con mejores mediciones donde un árbol de sintaxis ve lo que una lectura léxica no alcanza. Hasta llegar a la paridad, `km` sigue siendo la herramienta a usar.
 
-Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con todas las opciones y formatos de sus pares en `km`. `cycom` y `hal` están portados para Rust, Elixir y Kaikai, los lenguajes que km2 analiza; `km cycom` y `km hal` miden además una treintena de lenguajes que km2 deja fuera hasta incorporar sus gramáticas. Los demás comandos todavía no están implementados.
+Estado: `loc`, `indent`, `churn`, `age`, `authors` y `tc` están portados, con todas las opciones y formatos de sus pares en `km`. `cycom`, `hal` y `mi` están portados para Rust, Elixir y Kaikai, los lenguajes que km2 analiza; `km cycom`, `km hal` y `km mi` miden además una treintena de lenguajes que km2 deja fuera hasta incorporar sus gramáticas. Los demás comandos todavía no están implementados.
 
 ## Compilación
 
@@ -50,6 +50,7 @@ Cada valor que km2 informa distinto de `km` porque mide mejor, y por qué. Cada 
 | `hal` | `*_operators`, `*_operands` | un nombre de Elixir terminado en `!` leído como el nombre y el operador `!` (`fetch!`); uno terminado en `?`, sin él | un operando, el nombre como está escrito | El nombre como está escrito, como en `cycom`. |
 | `hal` | `*_operators`, `*_operands` | los delimitadores y la letra de un sigil de Elixir (`~r/a+b/i`, `~w(x y)`) | nada, como para un string; lo que interpola cuenta | Un sigil es un literal. |
 | `hal` | `*_operators`, `*_operands` | el `not in` de Elixir como dos operadores; un `not` llamado como función (`Kernel.not(x)`) como el operador; `...` como operador | `not in` un operador; ese `not` y `...` operandos | `not in` es un solo operador; los otros dos son nombres. |
+| `mi` | `halstead_volume`, `cyclomatic_complexity`, `mi_score`, `level` | el índice del volumen y la complejidad de km | el de los de km2 | `mi` no tiene diferencias propias: difiere donde una fila de `hal` o `cycom` de más arriba cambia el volumen o la complejidad de un archivo, y sus líneas de código son las de km. |
 
 ## Brechas conocidas
 

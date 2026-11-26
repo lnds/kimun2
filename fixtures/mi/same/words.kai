@@ -1,0 +1,12 @@
+# A pick over an option and a sum.
+
+fn pick(o: Option[Int]) : Int = match o {
+  Some(n) if n > 0 and n < 10 -> n * 2
+  Some(_) -> 0
+  None -> -1
+}
+
+fn total(xs: [Int], acc: Int) : Int = match xs {
+  [] -> acc
+  [x, ...rest] -> total(rest, acc + x)
+}

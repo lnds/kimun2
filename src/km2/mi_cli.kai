@@ -1,0 +1,90 @@
+# The `mi` command: walks the code files, parses those of a language
+# with a grammar once for Halstead's and the cyclomatic query, and
+# reports their Maintainability Index as km does.
+
+import ahu.cli
+import km2.churn
+import km2.cycom_cli
+import km2.git
+import km2.history_report
+import km2.indent
+import km2.mi
+import km2.mi.{FileMi}
+import km2.mi_report
+import km2.syntax.{Capture, Trees}
+import km2.tree_walk
+import km2.tree_walk.{Parsed}
+import km2.walk_cli
+import km2.walk_cli.{Common}
+
+fn read(w: Common, p: Parsed, tokens: [Capture], branches: [Capture]) : mi.Read {
+  let (_, kinds) = indent.classified(p.spec, p.src, w.exclude_tests)
+  mi.Read {
+    src: p.src,
+    kinds: kinds,
+    tests: cycom_cli.tests_left_out(w, p),
+    tokens: tokens,
+    branches: branches
+  }
+}
+
+fn of_text(w: Common, repo: Option[git.Repo], p: Parsed) : [FileMi] / Trees =
+  match Trees.captures_each(p.grammar, mi.QUERIES, p.src) {
+    [tokens, branches] ->
+      match mi.analyze(
+        indent.shown(repo, w.root, p.source.path),
+        p.spec.name,
+        read(w, p, tokens, branches)
+      ) {
+        Some(f) -> [f]
+        None -> []
+      }
+    _ -> []
+  }
+
+fn ascending(a: Real, b: Real) : Int = if a < b { -1 } else if a > b { 1 } else { 0 }
+
+#[doc("Files by `--sort-by`: mi (the default) lowest first; volume, complexity or loc highest first; ties in walk order.")]
+pub fn sorted(files: [FileMi], by: String) : [FileMi] = match by {
+  "volume" -> files |> list.sort_by((a, b) => ascending(b.volume, a.volume))
+  "complexity" -> files |> list.sort_by((a, b) => b.complexity - a.complexity)
+  "loc" -> files |> list.sort_by((a, b) => b.loc - a.loc)
+  _ -> files |> list.sort_by((a, b) => ascending(a.score, b.score))
+}
+
+fn render(c: cli.Context, format: String, files: [FileMi]) : Result[Unit, String] / Stdout {
+  let shown = history_report.shown_count(format, cli.integer(c, "top"), list.length(files))
+  match format {
+    "json" -> Ok(Stdout.print(mi_report.to_json(list.take(files, shown))))
+    "short" -> Ok(Stdout.print(mi_report.short(files)))
+    "terse" -> Ok(Stdout.print(mi_report.terse(files)))
+    "table" -> Ok(Stdout.print(mi_report.table(files, shown)))
+    _ -> Err(history_report.CI_FORMAT_ONLY)
+  }
+}
+
+fn run_mi(
+  c: cli.Context
+) : Result[Unit, String] / File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn =
+  walk_cli.walking(c, (cfg, w) => {
+    let repo = ok(git.discover(w.root))
+    let files = tree_walk.measured_each(
+      mi.QUERIES,
+      churn.measured_files(w, cfg.separate),
+      p => of_text(w, repo, p)
+    )
+    render(c, w.format, sorted(files, cli.text(c, "sort-by") ?? "mi"))
+  })
+
+#[doc("The `mi` command, with `km mi`'s arguments and options.")]
+pub fn command() : cli.Command[File + Env + Process + Stdout + Stderr + Clock + Ffi + Spawn] =
+  cli.command(
+    "mi",
+    "Compute Maintainability Index per file (Visual Studio variant, 0-100 scale)",
+    run_mi
+  )
+    |> walk_cli.with_common
+    |> walk_cli.with_top
+    |> walk_cli.with_sort_by("Sort by metric: mi, volume, complexity, or loc (default: mi)", "mi", [
+      "mi", "volume", "complexity", "loc"
+    ])

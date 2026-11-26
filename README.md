@@ -4,7 +4,7 @@ Code metrics over syntax trees: the successor of [km (Kimün)](https://github.co
 
 km2 aims to be a drop-in replacement for `km`: the same commands, flags, output formats, JSON schema and `.kimun.toml`, with better measurements wherever a syntax tree sees what a lexical reader cannot. Until it reaches parity, `km` remains the tool to use.
 
-Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom` and `hal` are ported for Rust, Elixir and Kaikai, which km2 parses; `km cycom` and `km hal` also measure some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
+Status: `loc`, `indent`, `churn`, `age`, `authors` and `tc` are ported, with every flag and format of their `km` counterparts. `cycom`, `hal` and `mi` are ported for Rust, Elixir and Kaikai, which km2 parses; `km cycom`, `km hal` and `km mi` also measure some thirty other languages, which km2 leaves out until it vendors their grammars. The other commands are not implemented yet.
 
 ## Building
 
@@ -50,6 +50,7 @@ Every value km2 reports differently from `km` because it measures better, and wh
 | `hal` | `*_operators`, `*_operands` | an Elixir name ending in `!` read as the name and the `!` operator (`fetch!`); one ending in `?` without it | one operand, the name as written | The name as written, as for `cycom`. |
 | `hal` | `*_operators`, `*_operands` | an Elixir sigil's delimiters and letter (`~r/a+b/i`, `~w(x y)`) | nothing, as for a string; what it interpolates counts | A sigil is a literal. |
 | `hal` | `*_operators`, `*_operands` | Elixir's `not in` as two operators; a `not` called as a function (`Kernel.not(x)`) as the operator; `...` as an operator | `not in` one operator; that `not` and `...` operands | `not in` is one operator; the other two are names. |
+| `mi` | `halstead_volume`, `cyclomatic_complexity`, `mi_score`, `level` | the index of km's own volume and complexity | the index of km2's | `mi` has no difference of its own: it differs where a `hal` or `cycom` row above changes a file's volume or complexity, and its code lines are km's. |
 
 ## Known gaps
 

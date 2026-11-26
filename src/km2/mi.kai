@@ -1,0 +1,84 @@
+# `mi`: the Maintainability Index of a file, in Visual Studio's variant:
+# from its Halstead volume, its cyclomatic complexity and its code lines,
+# on a scale of 0 to 100, without a term for comments.
+
+import km2.cycom
+import km2.hal
+import km2.lines.{LineKind, Code}
+import km2.syntax.{Capture}
+
+#[doc("The queries a file's index is read from, in the order `Read` takes their captures.")]
+pub const QUERIES : [String] = ["hal", "cycom"]
+
+#[doc("Visual Studio's bands of the index.")]
+pub type MiLevel = MiGreen | MiYellow | MiRed
+
+#[doc("The band a score falls in: green from 20, yellow from 10, red below.")]
+pub fn level_of(score: Real) : MiLevel =
+  if score >= 20.0 {
+    MiGreen
+  } else if score >= 10.0 {
+    MiYellow
+  } else {
+    MiRed
+  }
+
+#[doc("A file's index and what it is computed from.")]
+pub type FileMi = {
+  path: String,
+  language: String,
+  volume: Real,
+  complexity: Int,
+  loc: Int,
+  score: Real
+}
+
+#[doc("`max(0, (171 - 5.2 ln V - 0.23 G - 16.2 ln LOC) * 100 / 171)`; none without volume, complexity or code lines.")]
+pub fn score(volume: Real, complexity: Int, loc: Int) : Option[Real] =
+  if loc == 0 or volume <= 0.0 or complexity == 0 {
+    None
+  } else {
+    let raw = 171.0 -
+      5.2 * real_log(volume) -
+      0.23 * int_to_real(complexity) -
+      16.2 * real_log(int_to_real(loc))
+    let normal = raw * 100.0 / 171.0
+    Some(if normal > 0.0 { normal } else { 0.0 })
+  }
+
+#[doc("The source of a file as its index reads it: its text, the kind of each line, the line ranges left out as tests, and the captures of its `hal` and `cycom` queries.")]
+pub type Read = {
+  src: String,
+  kinds: [LineKind],
+  tests: [(Int, Int)],
+  tokens: [Capture],
+  branches: [Capture]
+}
+
+#[doc("A file's index from its Halstead volume, its total cyclomatic complexity and its code lines; none when `hal` or `cycom` measures nothing in it.")]
+pub fn analyze(path: String, language: String, r: Read) : Option[FileMi] {
+  let h = hal.analyze(r.tokens, r.src, r.kinds, path, language)!
+  let c = cycom.analyze(path, language, r.src, r.tests, r.branches)!
+  let loc = list.count(r.kinds, k => k == Code)
+  score(h.volume, c.total, loc)
+    |> option.map(
+      s => FileMi {
+        path: path,
+        language: language,
+        volume: h.volume,
+        complexity: c.total,
+        loc: loc,
+        score: s
+      }
+    )
+}
+
+#[doc("The index of a set of files: the mean of their scores weighted by their code lines, 0 for none.")]
+pub fn weighted(files: [FileMi]) : Real {
+  let (sum, lines) = files
+    |> list.foldl((0.0, 0), (acc, f) => {
+      let (s, n) = acc
+      (s + f.score * int_to_real(f.loc), n + f.loc)
+    })
+  if lines == 0 { 0.0 } else { sum / int_to_real(lines) }
+}
