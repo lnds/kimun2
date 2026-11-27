@@ -9,3 +9,5 @@ bench/out/
 
 # OS
 .DS_Store
+
+.claude/worktrees/
